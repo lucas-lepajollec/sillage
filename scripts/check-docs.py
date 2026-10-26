@@ -1,5 +1,7 @@
 """Check local documentation links and the literal README/Compose install contract."""
 from pathlib import Path
+import json
+import tomllib
 import re
 import subprocess
 from urllib.parse import unquote
@@ -24,6 +26,19 @@ if not compose_example or compose_example[1].strip() != (ROOT / 'docker-compose.
 for file in ['AGENTS.override.md', '.project-local/CONTEXT.md', '.env', 'config/secret.key']:
     if subprocess.run(['git', 'check-ignore', '-q', file], cwd=ROOT).returncode:
         errors.append(f'Private path must be ignored: {file}')
+version = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']['version']
+if not re.fullmatch(r'0\.0\.\d+', version):
+    errors.append('Release numbering must follow the owner-approved 0.0.X sequence')
+versions = {
+    'backend': re.search(r'__version__ = "([^"\n]+)"', (ROOT / 'backend/sillage/__init__.py').read_text())[1],
+    'Docker': re.search(r'^ARG VERSION=(.+)$', (ROOT / 'Dockerfile').read_text(), re.M)[1],
+    'frontend': json.loads((ROOT / 'frontend/package.json').read_text())['version'],
+    'npm lock': json.loads((ROOT / 'frontend/package-lock.json').read_text())['packages']['']['version'],
+    'uv lock': next(p['version'] for p in tomllib.loads((ROOT / 'uv.lock').read_text())['package'] if p['name'] == 'sillage'),
+}
+for artifact, value in versions.items():
+    if value != version:
+        errors.append(f'{artifact} version must match pyproject.toml')
 if errors:
     raise SystemExit('\n'.join(errors))
-print('Documentation links, copy-ready Compose and private-path exclusions pass.')
+print('Documentation links, copy-ready Compose, release versions and private-path exclusions pass.')

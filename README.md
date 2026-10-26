@@ -26,6 +26,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 - Lazy folder navigation, breadcrumbs, recursive on-demand scans, filters, selection and per-episode source tracks.
 - Embedded and external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
 - Reasoning disabled when supported; required reasoning stays usable with explicit time/token warnings.
+- Paginated translation history with search/status filters and readable mobile form fields.
 - Guided setup for OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Groq, Mistral, xAI, Ollama, LM Studio, vLLM, llama.cpp and compatible endpoints: live model discovery/search, manual fallback, multiple profiles and optional glossaries.
 - Strict cue IDs and protected formatting, neighboring context, bounded requests/retries and encrypted backend provider keys.
 - Adaptive batches start conservatively, shrink after invalid model output and reuse measured ceilings for the same profile/model.
@@ -72,7 +73,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.3.0` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.4` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 

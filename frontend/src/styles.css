@@ -1638,7 +1638,7 @@ main {
   flex: 1;
 }
 .preview-search input:not([type="checkbox"]) {
-  font-size: 12px !important;
+  font-size: 12px;
   min-height: 32px !important;
 }
 .preview-search > label {
@@ -2016,7 +2016,7 @@ main {
   max-width: 180px;
 }
 .jobs-toolbar-actions input {
-  font-size: 12px !important;
+  font-size: 12px;
   min-height: 31px !important;
 }
 .job-list {
@@ -3615,5 +3615,58 @@ main {
     right: 12px;
     bottom: auto;
     max-width: none;
+  }
+}
+
+
+.jobs-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+  scroll-margin-top: 80px;
+}
+.jobs-pagination:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.jobs-page-controls,
+.jobs-page-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.jobs-page-controls {
+  flex-wrap: wrap;
+}
+.jobs-page-size {
+  margin-right: 8px;
+}
+.jobs-page-size select {
+  width: 64px;
+  padding: 5px 8px;
+}
+.jobs-page-number {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 560px) {
+  .jobs-page-controls {
+    width: 100%;
+  }
+  .jobs-page-size {
+    margin-right: auto;
+  }
+}
+/* Small form text triggers focus zoom in iOS. Keep touch controls readable
+   across forms, search, selectors and drawers without disabling pinch zoom. */
+@media (max-width: 800px), (hover: none) and (pointer: coarse) {
+  :root :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    font-size: max(16px, 1rem);
   }
 }

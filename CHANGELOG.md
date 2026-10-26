@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.4 — 2026-10-26
+
+- Paginate translations with 10 jobs per page by default and 5/10/25 choices, result ranges and previous/next controls above and below the list. Search/filter changes return to page one; live progress refreshes keep the selected page, and shrinking results clamp to a valid page. Global counts and bulk retry still cover the whole queue.
+- Keep mobile/touch form text at least 16 px across searches, provider settings, selectors and preview drawers to avoid input focus zoom while retaining manual page zoom.
+- Adopt the requested `0.0.X` numbering, beginning at 0.0.4. Historical release tags stay intact; the current GitHub release and Docker image are explicitly marked latest.
+
 ## 0.3.0 — 2026-10-26
 
 - Prefer no reasoning across all provider adapters, using each API's controls and bounded capability discovery for Ollama, OpenRouter and LM Studio. Models requiring reasoning keep working with the lowest configurable effort and explicit time/token warnings.

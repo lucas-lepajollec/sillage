@@ -1,6 +1,6 @@
 # Verification status — 2026-10-26
 
-Sillage 0.3.0 adds a common reasoning preference, required-reasoning warnings and six additional cloud/local services. Adaptive batches and zero-duration source-event preservation from 0.2.2 remain. It uses Docker port 2511 and development browser port 2499. Version 0.2.0 adds guided cloud/local provider setup and live model discovery, alongside structured translation reliability fixes. Screenshots use fictional dialogue encoded into real generated MKVs and test-only provider profiles, never private media or credentials. The production app has no simulated provider.
+Sillage 0.0.4 adds paginated translations and readable mobile form controls. Release numbering now increments only the final component (`0.0.X`); historical tags remain intact. Version 0.3.0 introduced the common reasoning preference, required-reasoning warnings and six additional cloud/local services. Adaptive batches and zero-duration source-event preservation from 0.2.2 remain. It uses Docker port 2511 and development browser port 2499. Version 0.2.0 adds guided cloud/local provider setup and live model discovery, alongside structured translation reliability fixes. Screenshots use fictional dialogue encoded into real generated MKVs and test-only provider profiles, never private media or credentials. The production app has no simulated provider.
 
 ## Executed validation
 
@@ -9,7 +9,7 @@ Sillage 0.3.0 adds a common reasoning preference, required-reasoning warnings an
 | Backend suite | **331 passing tests**: generated real media, ASS/SSA/SRT invariants, filesystem confinement/atomic exports, thirteen provider/catalogue protocols, checkpoints/resume/cancellation, sync guards and API. Includes output-budget/recovery, catalogue bounds/pagination and saved-key isolation regressions. |
 | Ruff | Backend, tests and maintenance scripts pass. |
 | Frontend | TypeScript and Vite production build pass. |
-| Browser | **7 Chromium workflows pass**: real API/worker/HTTP provider ASS/SRT processing; guided provider setup on desktop/mobile; saved-key reuse, multiple profiles, stale-catalogue isolation, manual fallback, model search, empty results and light/short-height layouts. Includes selecting/saving mandatory-reasoning models, local optional keys and review warnings with real exports. Cloud catalogue responses in browser-only scenarios are isolated fixtures. |
+| Browser | **10 Chromium workflows pass**: real API/worker/HTTP provider ASS/SRT processing; guided provider setup on desktop/mobile; saved-key reuse, multiple profiles, stale-catalogue isolation, manual fallback, model search, empty results and light/short-height layouts. Includes selecting/saving mandatory-reasoning models, local optional keys and review warnings with real exports. Pagination tests cover desktop/mobile page sizes, boundaries, search/status resets, actual polling stability and shrinking results. Mobile computed font sizes are checked across search, preview and advanced provider fields, with manual zoom still permitted. Cloud catalogue responses and synthetic job histories in browser-only scenarios are isolated fixtures. |
 | Local container | Build and full smoke pass on linux/amd64: compiled UI, media tools, non-root worker, real ASS/SRT HTTP pipeline, exports/downloads, preserved timings/MKV hashes and healthcheck. |
 | Visual review | Rendered dark/light desktop, provider setup at 1440×1000 and 1280×640, and mobile at 390×844; subtitle tags are available through an explicit toggle. |
 | Publication contract | Canonical Compose is image-only, README example is identical, source builds use a separate override. Native amd64/arm64 publication jobs smoke-test immutable registry candidates before promotion. Live publication status is shown by GitHub Actions and GHCR. |
@@ -30,11 +30,14 @@ Catalogue tests verify thirteen native/compatible GET endpoints, native authenti
 - **Real library/player:** no production media library was mounted or changed. Verify host permissions, fonts, output discovery and playback in Jellyfin. Naming compatibility does not prove actual playback.
 - **Speech synchronization:** synthetic offsets, silent-audio rejection, ambiguity/drift guards and real FFmpeg/WebRTC extraction are tested. Empirical thresholds are not calibrated against a representative anime corpus. Only the first audio track is used.
 - **Complex ASS:** unsupported drawings/karaoke/animations/effects are preserved with review warnings. No universal fansub compatibility, translated-sign layout or pixel-rendered player validation is claimed.
+- **Mobile focus zoom:** the 16 px minimum and layout/zoom permissions are verified in Chromium emulation. Actual iPhone/iPad Safari focus/keyboard behavior remains a real-device acceptance check.
 - **Coverage limits:** automated browser tests cover the principal workflow; cancellation/resume and sync acceptance/refusal branches have backend coverage, with remaining click-level acceptance to do. Actual mobile devices and other browsers are unverified. Multi-architecture CI is the publication gate; do not infer native arm64 execution from a local amd64 build.
 
 ## Evidence and reproduction
 
 [Explorer](screenshots/explorer-dark.png) · [Translated preview](screenshots/translation-preview-dark.png) · [Light theme](screenshots/translations-light.png) · [Mobile preview](screenshots/preview-mobile.png) · [Mobile settings](screenshots/settings-mobile.png).
+
+[Paginated translations](screenshots/translations-pagination-desktop.png) · [Mobile pagination](screenshots/translations-pagination-mobile.png).
 
 [Guided provider setup](screenshots/providers-desktop.png) · [Mobile provider setup](screenshots/providers-mobile.png) · [Light provider form](screenshots/providers-light.png).
 

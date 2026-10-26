@@ -12,6 +12,10 @@ Sillage is a focused, self-hosted subtitle translation studio: browse mounted me
 - Export through exclusive atomic publication. Never replace existing output automatically.
 - Keep provider secrets on the backend, encrypted at rest and excluded from logs/API responses.
 
+## Release numbering
+
+Lucas explicitly chose `0.0.X`, increasing only the final number (starting with 0.0.4). Keep historical 0.1/0.2/0.3 tags intact. Explicitly mark the newest release/image as latest; do not infer it from the highest semantic version.
+
 ## Development and verification
 
 Python 3.12+, uv, Node 22+, Docker and FFmpeg/ffprobe:
