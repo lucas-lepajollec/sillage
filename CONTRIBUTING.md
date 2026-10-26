@@ -12,7 +12,7 @@ npm --prefix frontend ci
 npm --prefix frontend run build
 ```
 
-On Linux/macOS, `MEDIA_ROOTS=/absolute/media ./scripts/dev.sh` serves the application on loopback port 5775. For frontend hot reload, run `uv run uvicorn sillage.app:create_app --factory --host 127.0.0.1 --port 5775 --no-access-log` and `npm --prefix frontend run dev` in separate terminals. On PowerShell, set `$env:MEDIA_ROOTS = 'C:\Media'` before starting those same two commands. Docker runs the production Linux worker.
+On Linux/macOS, `MEDIA_ROOTS=/absolute/media ./scripts/dev.sh` serves the application on loopback port 2499. For frontend hot reload, run `uv run uvicorn sillage.app:create_app --factory --host 127.0.0.1 --port 2500 --no-access-log` and `npm --prefix frontend run dev` in separate terminals, then open `http://127.0.0.1:2499` (Vite proxies `/api` to the backend on port 2500). On PowerShell, set `$env:MEDIA_ROOTS = 'C:\Media'` before starting those same two commands. Docker runs the production Linux worker.
 
 ## Checks
 

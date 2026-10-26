@@ -34,7 +34,7 @@ def main():
         service = resolved["services"]["sillage"]
         service["image"] = os.environ.get("SILLAGE_TEST_IMAGE", "sillage:local")
         service["environment"] |= {"PUID": str(os.getuid()), "PGID": str(os.getgid())}
-        service["ports"] = [{"target": 5775, "published": "0", "host_ip": "127.0.0.1", "protocol": "tcp"}]
+        service["ports"] = [{"target": 2511, "published": "0", "host_ip": "127.0.0.1", "protocol": "tcp"}]
         service["volumes"] = [f"{media}:/media:rw,Z", f"{config}:/config:rw,Z", f"{work / 'test-provider.py'}:/test-provider.py:ro,Z"]
         resolved.pop("name", None)
         for network in resolved.get("networks", {}).values():
@@ -46,7 +46,7 @@ def main():
             docker(*compose_args, "up", "-d", "--pull", "never")
             container_id = docker(*compose_args, "ps", "-q", "sillage")
             name = container_id
-            port = json.loads(docker("inspect", name))[0]["NetworkSettings"]["Ports"]["5775/tcp"][0]["HostPort"]
+            port = json.loads(docker("inspect", name))[0]["NetworkSettings"]["Ports"]["2511/tcp"][0]["HostPort"]
             base = f"http://127.0.0.1:{port}"
             with httpx.Client(base_url=base, timeout=20, trust_env=False) as client:
                 for _ in range(80):
@@ -100,7 +100,7 @@ def main():
                     assert preview["cues"][0]["start"] == 500
                 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*.mkv")} == original
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
-                assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:5775/api/health').status == 200") == ""
+                assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
                 print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, no source mutation, downloads and healthcheck.")
         finally:

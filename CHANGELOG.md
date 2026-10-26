@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.1 — 2026-10-26
+
+- Use port **2511** for the production container and its default host mapping, including the healthcheck.
+- Use browser port **2499** for local development, with a separate loopback backend on 2500 only for Vite hot reload.
+- Existing installations must change their Compose mapping from `5775:5775` to `2511:2511` when pulling this image. No configuration/database migration is required. Keep the old mapping when rolling back to 0.2.0.
+
 ## 0.2.0 — 2026-10-26
 
 - Simplify provider setup: choose a service, enter its key or local server URL, load its models and select one. Names are optional; languages, glossary and limits remain under advanced settings.

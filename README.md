@@ -41,7 +41,7 @@ services:
   sillage:
     image: ghcr.io/lucas-lepajollec/sillage:latest
     ports:
-      - "5775:5775"
+      - "2511:2511"
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
@@ -59,7 +59,7 @@ Point `MEDIA_PATH` to your actual host library in an optional `.env`, and set `P
 docker compose up -d
 ```
 
-Open **`http://<your-server-ip>:5775`**. In **Paramètres**, choose a provider, enter its key or local server URL and select a model. Catalogue lookup does not generate text; the separate connection test makes a real model request and may incur the provider's normal charge. Then browse `/media` in **Explorer**.
+Open **`http://<your-server-ip>:2511`**. In **Paramètres**, choose a provider, enter its key or local server URL and select a model. Catalogue lookup does not generate text; the separate connection test makes a real model request and may incur the provider's normal charge. Then browse `/media` in **Explorer**.
 
 You can also clone this repository and use its identical [Compose file](docker-compose.yml):
 
@@ -70,7 +70,9 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.2.0` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.2.1` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+
+Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 
 ## 5. Configuration and persistence
 
@@ -79,7 +81,7 @@ This downloads the published image; it does not build source or require Python/N
 | `./config:/config` | SQLite jobs, checkpoints, provider settings and separate encryption key. Back up the entire directory together. |
 | `${MEDIA_PATH:-./media}:/media:rw` | Host library. Read access for MKVs/source tracks, write access for translated sidecars. |
 | `PUID` / `PGID` | Worker identity, default `1000:1000`. The root entrypoint initializes config ownership, then drops privileges. Media ownership is never changed. |
-| Port `5775:5775` | Same published and container port. Adapt the host side if it is already used. |
+| Port `2511:2511` | Same published and container port. Adapt the host side if it is already used. |
 | `MEDIA_ROOTS` | Advanced backend roots, default `/media`; colon-separated paths inside the container. Mount each directory explicitly. |
 | `ACCESS_KEY` | Optional shared access key, configured through a private Compose override. |
 | `ALLOWED_HOSTS` | Additional hostname allowlist for a local reverse proxy; private IPs and localhost work by default. |

@@ -25,7 +25,7 @@ docker compose ps
 docker compose logs --tail=80 sillage
 ```
 
-Open `http://<your-server-ip>:5775`. Configure a provider and test one selected episode first. The image healthcheck calls `/api/health`; it proves the server responds, not media permissions or provider quality.
+Open `http://<your-server-ip>:2511`. Configure a provider and test one selected episode first. The image healthcheck calls `/api/health`; it proves the server responds, not media permissions or provider quality.
 
 ## Permissions and mounts
 
@@ -37,13 +37,13 @@ The media directory is intentionally mounted read/write for exports; MKVs are ne
 
 ## Network access
 
-The recommended `5775:5775` mapping publishes on the Docker host's interfaces. Use a trusted LAN/VPN and firewall. Change the host side of the mapping if the port is taken.
+The recommended `2511:2511` mapping publishes on the Docker host's interfaces. Use a trusted LAN/VPN and firewall. Change the host side of the mapping if the port is taken.
 
 For loopback-only access, edit the mapping to:
 
 ```yaml
 ports:
-  - "127.0.0.1:5775:5775"
+  - "127.0.0.1:2511:2511"
 ```
 
 For an access key, create an ignored `docker-compose.override.yml`:
@@ -106,3 +106,9 @@ The build override is deliberately separate from the recommended pull-only file.
 - **Interrupted job:** use Reprendre. Validated batches remain checkpointed; changing translation-affecting provider settings requires a new job.
 - **ASS review:** unsupported geometry/karaoke/animation is preserved and warned, not silently discarded.
 - **Sync refusal:** keep source timings or choose an explicit manual offset. A refusal is preferable to publishing an uncertain correction.
+
+## Updating from 0.2.0 or earlier
+
+Starting with 0.2.1, Sillage listens on **2511** inside the container. Update an existing Compose file from `5775:5775` to `2511:2511` before running `docker compose pull` and `docker compose up -d`. Open `http://<your-server-ip>:2511` and update any reverse-proxy target accordingly. A host port of your choice is still possible, for example `5775:2511` to retain the previous browser URL. Configuration, keys, media mounts and translation checkpoints do not change.
+
+For rollback to 0.2.0, restore the previous container-port mapping as well as the previous image tag.

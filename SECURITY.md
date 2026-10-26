@@ -9,7 +9,7 @@ Report vulnerabilities privately through [GitHub security advisories](https://gi
 - Media roots confine navigation and processing; MKVs are read-only to application logic. Sidecar publication is atomic and exclusive.
 - Provider keys are encrypted with a separate key under /config. Administrators who can read both can decrypt them. Keep the entire config directory and backups private.
 - Translation sends subtitle text/context/glossary to the selected provider. HTTP LAN endpoints are supported; choose HTTPS or a trusted network when confidentiality matters.
-- Compose publishes port 5775 on host interfaces, as a normal self-hosted service. Use trusted networks and a firewall. For broader exposure, configure ACCESS_KEY, HTTPS and a reverse proxy. See [Docker operations](docs/docker.md).
+- Compose publishes port 2511 on host interfaces, as a normal self-hosted service. Use trusted networks and a firewall. For broader exposure, configure ACCESS_KEY, HTTPS and a reverse proxy. See [Docker operations](docs/docker.md).
 - Authentication is an optional shared access key, not a multi-user identity system. No rate-limiting, adversarial filesystem sandbox or independent audit is claimed.
 
 Never enable provider HTTP body/header debug logging with real data. Preserve the secret key with the database when restoring. See [limitations](docs/limits.md) for the distinction between timing preservation, heuristic audio alignment and real-player validation.

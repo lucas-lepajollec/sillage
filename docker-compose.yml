@@ -2,7 +2,7 @@ services:
   sillage:
     image: ghcr.io/lucas-lepajollec/sillage:latest
     ports:
-      - "5775:5775"
+      - "2511:2511"
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
