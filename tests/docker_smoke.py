@@ -63,15 +63,22 @@ def main():
                 assert "Sillage" in client.get("/").text
                 worker_uid = docker("exec", name, "python", "-c", "from pathlib import Path; print(next(p.joinpath('status').read_text().split('Uid:')[1].split()[0] for p in Path('/proc').iterdir() if p.name.isdigit() and p.name != '1' and p.joinpath('cmdline').exists() and b'sillage.app:create_app' in p.joinpath('cmdline').read_bytes().split(bytes([0]))))")
                 assert worker_uid == str(os.getuid()), worker_uid
-                docker("exec", "-d", name, "python", "/test-provider.py")
-                time.sleep(0.2)
+                docker("exec", "-d", name, "sh", "-c", "exec python /test-provider.py >/tmp/sillage-test-provider.log 2>&1")
                 response = client.post("/api/providers", json={"kind": "custom", "name": "Docker test only", "model": "deterministic", "base_url": "http://127.0.0.1:5777/v1", "target_language": "fr", "source_language": "en"})
                 response.raise_for_status()
                 provider = response.json()
-                assert client.post(f"/api/providers/{provider['id']}/test").status_code == 200
-                catalogue = client.post("/api/providers/models", json={"id": provider["id"], "kind": "custom", "base_url": provider["base_url"]})
+                for _ in range(50):
+                    catalogue = client.post("/api/providers/models", json={"id": provider["id"], "kind": "custom", "base_url": provider["base_url"]})
+                    if catalogue.status_code == 200:
+                        break
+                    time.sleep(0.2)
+                else:
+                    fixture_log = docker("exec", name, "cat", "/tmp/sillage-test-provider.log")
+                    raise AssertionError(f"Test-only provider did not become ready: {catalogue.text}; {fixture_log[:1000]}")
                 catalogue.raise_for_status()
                 assert catalogue.json() == {"models": [{"id": "deterministic", "name": "Deterministic test model"}], "truncated": False}
+                connection = client.post(f"/api/providers/{provider['id']}/test")
+                assert connection.status_code == 200, connection.text
                 scan = client.post("/api/scan", json={"path": "/media", "recursive": True}).json()
                 assert len(scan["episodes"]) == 3, scan
                 selected = scan["episodes"][:2]
