@@ -1,0 +1,148 @@
+<p align="center"><img src="assets/logo.svg" width="72" height="72" alt="Sillage"></p>
+<h1 align="center">Sillage</h1>
+<p align="center"><strong>A focused, self-hosted subtitle translation studio.</strong><br>Browse a folder, choose your MKV tracks, translate and export safe sidecars.</p>
+<p align="center">
+  <a href="https://github.com/lucas-lepajollec/sillage/actions/workflows/ci.yml"><img src="https://github.com/lucas-lepajollec/sillage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/lucas-lepajollec/sillage/pkgs/container/sillage"><img src="https://img.shields.io/badge/container-GHCR-dfb47d" alt="GHCR container"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-dfb47d" alt="GPL-3.0-only"></a>
+</p>
+
+## 1. Overview
+
+Sillage translates text subtitles already present in your MKVs, especially English anime subtitles you want to read in French. It also accepts matching external ASS/SSA/SRT files. The interface is in French, with dark and light themes.
+
+**Choose a folder → scan → select episodes and tracks → translate → use the sidecars.**
+
+Original MKVs and source subtitles stay intact. Translation preserves source timestamps. Unsupported karaoke, drawings or animations remain untouched and produce explicit review warnings. Sillage stays focused on this workflow; it does not index your entire library at startup or manage your media servers.
+
+## 2. Product preview
+
+![Sillage explorer with selected episodes](docs/screenshots/explorer-dark.png)
+
+The screenshot uses generated test media, not a private library. [Before/after preview](docs/screenshots/translation-preview-dark.png) · [Light theme](docs/screenshots/translations-light.png) · [Mobile preview](docs/screenshots/preview-mobile.png).
+
+## 3. Highlights
+
+- Lazy folder navigation, breadcrumbs, recursive on-demand scans, filters, selection and per-episode source tracks.
+- Embedded and external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
+- OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Ollama and custom OpenAI-compatible endpoints, with freely entered model IDs and profile glossaries.
+- Strict cue IDs and protected formatting, neighboring context, bounded requests/retries and encrypted backend provider keys.
+- SQLite checkpoints, real processing stages, cancellation and resume without retranslating validated batches.
+- Atomic external exports such as `Episode 01.fr.ass`, without replacing existing output.
+- Explicit manual offsets and conservative audio-only synchronization proposals requiring your acceptance.
+- One container: compiled React frontend, FastAPI, SQLite, worker, FFmpeg/MKVToolNix and ffsubsync. No Node server in production.
+
+## 4. Quick start
+
+Install Docker with Compose. Save the following as `docker-compose.yml` in a new directory:
+
+```yaml
+services:
+  sillage:
+    image: ghcr.io/lucas-lepajollec/sillage:latest
+    ports:
+      - "5775:5775"
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - ./config:/config
+      - ${MEDIA_PATH:-./media}:/media:rw
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+```
+
+Point `MEDIA_PATH` to your actual host library in an optional `.env`, and set `PUID`/`PGID` to its owner/group (`id -u`, `id -g`). Without that file, Sillage starts with an empty `./media` folder and persists settings in `./config`.
+
+```bash
+docker compose up -d
+```
+
+Open **`http://<your-server-ip>:5775`**. Configure an AI provider in **Paramètres**, then browse `/media` in **Explorer**. The connection test makes a real model request and may incur the provider's normal charge.
+
+You can also clone this repository and use its identical [Compose file](docker-compose.yml):
+
+```bash
+git clone https://github.com/lucas-lepajollec/sillage.git
+cd sillage
+# Optional: copy .env.example to .env and set your host media path and UID/GID.
+docker compose up -d
+```
+
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.1.0` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+
+## 5. Configuration and persistence
+
+| Setting or mount | Purpose |
+| --- | --- |
+| `./config:/config` | SQLite jobs, checkpoints, provider settings and separate encryption key. Back up the entire directory together. |
+| `${MEDIA_PATH:-./media}:/media:rw` | Host library. Read access for MKVs/source tracks, write access for translated sidecars. |
+| `PUID` / `PGID` | Worker identity, default `1000:1000`. The root entrypoint initializes config ownership, then drops privileges. Media ownership is never changed. |
+| Port `5775:5775` | Same published and container port. Adapt the host side if it is already used. |
+| `MEDIA_ROOTS` | Advanced backend roots, default `/media`; colon-separated paths inside the container. Mount each directory explicitly. |
+| `ACCESS_KEY` | Optional shared access key, configured through a private Compose override. |
+| `ALLOWED_HOSTS` | Additional hostname allowlist for a local reverse proxy; private IPs and localhost work by default. |
+
+Providers, model IDs, source/target languages, glossary, batch size, concurrency, timeouts and retries are configured in the UI. One episode runs at a time, with one provider request at a time by default. See [provider setup](docs/providers.md).
+
+A full French track can be filtered out; forced/signs-only French metadata does not automatically count as a complete translation. Review unknown or incorrect language tags manually.
+
+## 6. Security, privacy, and limitations
+
+Use a trusted LAN or VPN. The default Compose publishes on host interfaces, without application authentication until you configure an access key. For wider exposure, use an access key, HTTPS/reverse proxy and appropriate firewall rules. A [localhost-only override and access-key setup](docs/docker.md#network-access) are documented.
+
+Cloud translation sends subtitle text, context and glossary to your chosen provider. Keys stay on the backend and are encrypted at rest; an administrator with both the database and its key can still decrypt them. Never publish config, logs containing private text or real credentials.
+
+**Preserved timestamps do not mean verified audio synchronization.** Automatic alignment uses the first audio track, proposes only a bounded global offset and can refuse uncertain material. It requires 2 minutes–4 hours of audio and at least 20 usable cues. It does not fix clock drift or different cuts.
+
+ASS syntax preservation does not prove that longer French signs fit their original position or that your player has the expected fonts. Complex karaoke, drawings, transformations and effects can remain untranslated with warnings. Real-model language quality, actual Jellyfin playback and sync confidence on your collection still require operator acceptance. [Detailed limits](docs/limits.md) · [Security policy](SECURITY.md).
+
+## 7. Architecture
+
+```text
+Browser — React / TypeScript / TanStack
+              │ HTTP / progress polling
+FastAPI — compiled frontend + confined media API
+              │
+SQLite checkpoints ─ single worker ─ configured cloud/LAN provider
+              │
+FFmpeg inspection/extraction ─ guarded subtitle reconstruction
+              │
+Validated external sidecar beside the original MKV
+```
+
+pysubs2 independently validates structure/timings while Sillage patches original text spans. A bounded lexer adapted from Sublarr protects ASS drawing state. ffsubsync's FFT engine and WebRTC VAD supply conservative audio proposals. [Reuse/source audit](docs/research.md) · [Third-party notices](THIRD_PARTY_NOTICES.md).
+
+## 8. Development and quality
+
+Prerequisites: Python 3.12+, uv, Node 22+, FFmpeg/ffprobe and Docker.
+
+```bash
+uv sync --frozen --extra dev --extra sync --python 3.12
+npm --prefix frontend ci
+uv run ruff check backend tests scripts
+uv run --extra dev --extra sync pytest -q
+npm --prefix frontend run check
+npm --prefix frontend run build
+```
+
+The [contribution guide](CONTRIBUTING.md) covers local development, browser tests and container smoke tests. [Verification status](docs/STATUS.md) distinguishes executed tests from real-library acceptance.
+
+To build the current checkout rather than pull an image:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+## 9. Public demo
+
+There is no hosted public demo. Screenshots and browser tests use disposable generated media; the production app has no mock translation provider.
+
+## 10. Documentation and community
+
+- [Docker installation, updates, backups and rollback](docs/docker.md)
+- [Providers](docs/providers.md), [ASS/sync limits](docs/limits.md), [verification](docs/STATUS.md)
+- [Contributing](CONTRIBUTING.md), [support](SUPPORT.md), [code of conduct](CODE_OF_CONDUCT.md)
+- [Issues](https://github.com/lucas-lepajollec/sillage/issues), [private security reports](SECURITY.md), [changelog](CHANGELOG.md)
+- [GPL-3.0-only license](LICENSE), [third-party notices](THIRD_PARTY_NOTICES.md)

@@ -1,0 +1,47 @@
+name: Source quality
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Tests and production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: '0.9.5'
+          python-version: '3.12'
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install media tools and locked dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          uv sync --frozen --extra dev --extra sync
+          npm --prefix frontend ci
+      - name: Backend and public documentation checks
+        run: |
+          uv run ruff check backend tests scripts
+          uv run --extra dev --extra sync pytest -q
+          python scripts/check-docs.py
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet
+      - name: Typecheck and build frontend
+        run: |
+          npm --prefix frontend run check
+          npm --prefix frontend run build
+      - name: Chromium end-to-end workflow
+        working-directory: frontend
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e

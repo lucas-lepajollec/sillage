@@ -1,0 +1,8 @@
+# Build this checkout instead of downloading the published image.
+# docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  sillage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sillage:local

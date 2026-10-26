@@ -1,0 +1,14 @@
+services:
+  sillage:
+    image: ghcr.io/lucas-lepajollec/sillage:latest
+    ports:
+      - "5775:5775"
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - ./config:/config
+      - ${MEDIA_PATH:-./media}:/media:rw
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

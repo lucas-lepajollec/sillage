@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest a focused improvement to the subtitle workflow.
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What task is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed behavior and simpler alternatives
+      description: Keep original media safety and the small product scope in mind.
+    validations:
+      required: true

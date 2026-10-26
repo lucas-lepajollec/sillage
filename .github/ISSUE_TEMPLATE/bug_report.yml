@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible problem with sanitized evidence.
+body:
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Share a minimal subtitle fixture you have permission to publish. No private media, keys or config databases.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Image tag or digest and host architecture
+      placeholder: "0.1.0 / linux/amd64"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized errors and validation state
+      description: Say whether source timings were preserved or synchronization was explicitly requested.
