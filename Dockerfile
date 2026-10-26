@@ -5,7 +5,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM python:3.12-slim-bookworm AS python-builder
+FROM python:3.15-slim-bookworm AS python-builder
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
@@ -13,7 +13,7 @@ COPY pyproject.toml uv.lock ./
 COPY backend/ ./backend/
 RUN uv sync --frozen --extra sync --no-dev
 
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 ARG VERSION=0.0.4
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="Sillage" \
