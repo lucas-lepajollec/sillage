@@ -14,7 +14,7 @@ COPY backend/ ./backend/
 RUN uv sync --frozen --extra sync --no-dev
 
 FROM python:3.12-slim-bookworm
-ARG VERSION=0.2.0
+ARG VERSION=0.2.1
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="Sillage" \
       org.opencontainers.image.description="A focused, self-hosted subtitle translation studio" \
@@ -33,7 +33,7 @@ COPY --from=frontend /build/dist /app/frontend/dist
 COPY scripts/entrypoint.sh /usr/local/bin/sillage-entrypoint
 COPY LICENSE THIRD_PARTY_NOTICES.md /app/licenses/
 ENV PATH="/app/.venv/bin:$PATH" CONFIG_DIR=/config MEDIA_ROOTS=/media PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
-EXPOSE 5775
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5775/api/health', timeout=4)"
+EXPOSE 2511
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2511/api/health', timeout=4)"
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sillage-entrypoint"]
-CMD ["uvicorn", "sillage.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "5775", "--no-access-log"]
+CMD ["uvicorn", "sillage.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "2511", "--no-access-log"]

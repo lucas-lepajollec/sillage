@@ -1,6 +1,6 @@
 # Verification status — 2026-10-26
 
-Sillage 0.2.0 adds guided cloud/local provider setup and live model discovery, alongside structured translation reliability fixes. Screenshots use fictional dialogue encoded into real generated MKVs and test-only provider profiles, never private media or credentials. The production app has no simulated provider.
+Sillage 0.2.1 uses Docker port 2511 and development browser port 2499. Version 0.2.0 adds guided cloud/local provider setup and live model discovery, alongside structured translation reliability fixes. Screenshots use fictional dialogue encoded into real generated MKVs and test-only provider profiles, never private media or credentials. The production app has no simulated provider.
 
 ## Executed validation
 
