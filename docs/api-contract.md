@@ -6,6 +6,7 @@ POST /api/scan {path,recursive:boolean} -> {episodes:[{path,name,duration:number
 POST /api/preview {path,track_id} -> {format,cues:[{id:string,start:number,end:number,text:string,translated?:string,warning?:string}],warnings:string[],timing_status:string}; start/end milliseconds.
 GET /api/providers -> Provider[] (no api_key; has_key:boolean)
 POST /api/providers body Provider + api_key -> sanitized saved provider.
+POST /api/providers/models {id?:string,kind:string,base_url?:string,api_key?:string} -> {models:[{id:string,name:string}],truncated:boolean}. Live catalogue GET only, no generation or save. An omitted key reuses the saved id's key only for its unchanged provider kind/normalized endpoint. Results and errors never return the key.
 DELETE /api/providers/{id} -> {ok:true}
 POST /api/providers/{id}/test -> {ok:true,message:string} genuine call.
 Provider: {id?:string,name,kind:'openai'|'anthropic'|'gemini'|'deepseek'|'openrouter'|'ollama'|'custom',base_url:string,model:string,temperature:number|null,batch_size:number,concurrency:number,timeout:number,retries:number,source_language:string,target_language:string,glossary:string,api_key?:string,has_key?:boolean}

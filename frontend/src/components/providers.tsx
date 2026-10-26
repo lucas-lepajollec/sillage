@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { api, message } from "../api";
 import { cn } from "../lib";
-import type { Health, Provider, ProviderKind } from "../types";
+import type { Health, ModelCatalog, Provider, ProviderKind } from "../types";
 import { Button } from "./ui/button";
 import { Empty, ErrorNotice, Modal, Spinner } from "./shared";
 
@@ -34,14 +34,14 @@ const kinds: { id: ProviderKind; label: string; base: string }[] = [
     label: "Google Gemini",
     base: "https://generativelanguage.googleapis.com/v1beta",
   },
-  { id: "deepseek", label: "DeepSeek", base: "https://api.deepseek.com" },
+  { id: "deepseek", label: "DeepSeek", base: "https://api.deepseek.com/v1" },
   {
     id: "openrouter",
     label: "OpenRouter",
     base: "https://openrouter.ai/api/v1",
   },
   { id: "ollama", label: "Ollama", base: "" },
-  { id: "custom", label: "OpenAI compatible", base: "" },
+  { id: "custom", label: "Serveur compatible OpenAI", base: "" },
 ];
 const emptyProvider = (): Provider => ({
   name: "",
@@ -49,9 +49,9 @@ const emptyProvider = (): Provider => ({
   base_url: kinds[0].base,
   model: "",
   temperature: null,
-  batch_size: 30,
+  batch_size: 20,
   concurrency: 1,
-  timeout: 90,
+  timeout: 120,
   retries: 3,
   source_language: "en",
   target_language: "fr",
@@ -128,7 +128,7 @@ export function Providers({
         </div>
         <Button onClick={() => setEditing(emptyProvider())}>
           <Plus size={16} />
-          Ajouter un provider
+          Ajouter un fournisseur
         </Button>
       </div>
       <section className="settings-section">
@@ -136,7 +136,7 @@ export function Providers({
           <div>
             <h2>
               <Cpu size={18} />
-              Providers de traduction
+              Fournisseurs de traduction
             </h2>
             <p>
               Un profil associe un service, un modèle et un glossaire. Utilisez
@@ -147,7 +147,7 @@ export function Providers({
             {providers.length} configuré{providers.length > 1 ? "s" : ""}
           </span>
         </div>
-        {loading && <Spinner>Chargement des providers…</Spinner>}
+        {loading && <Spinner>Chargement des fournisseurs…</Spinner>}
         {!!error && <ErrorNotice error={message(error)} retry={retry} />}
         {!loading && !error && providers.length === 0 && (
           <div className="provider-empty">
@@ -160,13 +160,14 @@ export function Providers({
                   onClick={() => setEditing(emptyProvider())}
                 >
                   <Plus size={15} />
-                  Configurer mon premier provider
+                  Connecter mon premier fournisseur
                   <ArrowRight size={14} />
                 </Button>
               }
             >
-              Connectez une API cloud ou votre serveur Ollama. Choisissez
-              librement le modèle, sans liste imposée.
+              Choisissez un fournisseur, ajoutez votre clé et sélectionnez un
+              modèle. Vous pouvez enregistrer plusieurs profils, cloud ou
+              locaux.
             </Empty>
             <div className="provider-types">
               <span>OpenAI</span>
@@ -351,7 +352,7 @@ export function Providers({
         description={deleting?.name}
       >
         <p className="modal-body-copy">
-          La configuration du provider et sa clé seront supprimées. Les
+          La configuration du fournisseur et sa clé seront supprimées. Les
           sous-titres déjà exportés restent disponibles.
         </p>
         {remove.isError && <ErrorNotice error={message(remove.error)} />}
@@ -384,108 +385,160 @@ function ProviderForm({
   const [form, setForm] = useState<Provider>({ ...provider, api_key: "" });
   const [advanced, setAdvanced] = useState(false);
   const [reveal, setReveal] = useState(false);
+  const [manual, setManual] = useState(false);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [search, setSearch] = useState("");
+  const requestId = useRef(0);
+  const loadingRef = useRef(false);
+  const local = form.kind === "ollama" || form.kind === "custom";
+  const sameService =
+    form.kind === provider.kind && form.base_url === provider.base_url;
+  const savedKey = sameService && provider.has_key;
+  const readyToLoad = local
+    ? Boolean(form.base_url.trim())
+    : Boolean(form.api_key?.trim() || savedKey);
+  const kind = kinds.find((item) => item.id === form.kind)!;
+  const filtered = (catalog?.models || []).filter((model) =>
+    `${model.id} ${model.name}`
+      .toLocaleLowerCase()
+      .includes(search.toLocaleLowerCase()),
+  );
+  const currentMissing = Boolean(
+    form.model && !filtered.some((model) => model.id === form.model),
+  );
   const save = useMutation({
     mutationFn: () =>
       api<Provider>("/providers", {
         ...form,
+        name: form.name.trim() || `${kind.label} · ${form.model}`.slice(0, 100),
         api_key: form.api_key || undefined,
       }),
     onSuccess: onSaved,
   });
-  const update = <K extends keyof Provider>(key: K, value: Provider[K]) =>
+  useEffect(
+    () => () => {
+      requestId.current += 1;
+    },
+    [],
+  );
+  const invalidateCatalog = () => {
+    requestId.current += 1;
+    loadingRef.current = false;
+    setCatalog(null);
+    setModelError(null);
+    setLoadingModels(false);
+    setSearch("");
+  };
+  const update = <K extends keyof Provider>(key: K, value: Provider[K]) => {
+    if (key === "api_key" || key === "base_url") invalidateCatalog();
     setForm((old) => ({ ...old, [key]: value }));
+  };
+  const loadModels = async () => {
+    if (!readyToLoad || loadingRef.current) return;
+    const id = ++requestId.current;
+    loadingRef.current = true;
+    setLoadingModels(true);
+    setModelError(null);
+    try {
+      const result = await api<ModelCatalog>("/providers/models", {
+        id: sameService ? provider.id : undefined,
+        kind: form.kind,
+        base_url: form.base_url,
+        api_key: form.api_key || "",
+      });
+      if (id !== requestId.current) return;
+      setCatalog(result);
+      if (result.models.length === 1 && !form.model) {
+        setForm((old) =>
+          old.model ? old : { ...old, model: result.models[0].id },
+        );
+      }
+    } catch (error) {
+      if (id === requestId.current) setModelError(message(error));
+    } finally {
+      if (id === requestId.current) {
+        loadingRef.current = false;
+        setLoadingModels(false);
+      }
+    }
+  };
+  const endpoint = (
+    <label className="form-field">
+      {local ? "URL du serveur" : "URL de l’API"}
+      <input
+        type="url"
+        value={form.base_url}
+        onChange={(e) => update("base_url", e.target.value)}
+        required={local}
+        placeholder={
+          form.kind === "ollama"
+            ? "http://votre-serveur:11434"
+            : "http://votre-serveur:1234/v1"
+        }
+        spellCheck={false}
+      />
+      <small>
+        {form.kind === "ollama"
+          ? "Adresse de votre serveur Ollama, joignable depuis Sillage."
+          : form.kind === "custom"
+            ? "LM Studio, llama.cpp, vLLM ou tout service proposant une API compatible OpenAI."
+            : "Adresse du service, à modifier uniquement si vous utilisez un proxy."}
+      </small>
+    </label>
+  );
   return (
     <Modal
       open
+      wide
       onOpenChange={(open) => {
         if (!open && !save.isPending) onClose();
       }}
-      wide
-      title={
-        provider.id ? "Modifier le profil" : "Nouveau provider de traduction"
-      }
-      description="Choisissez un service et saisissez l’identifiant exact du modèle."
+      title={provider.id ? "Modifier le profil" : "Connecter un fournisseur"}
+      description="Choisissez un service, puis un modèle. Vous pouvez ajouter autant de profils que nécessaire."
     >
       <form
         className="provider-form"
         onSubmit={(e) => {
           e.preventDefault();
-          save.mutate();
+          if (form.model.trim() && !loadingModels && !save.isPending)
+            save.mutate();
         }}
       >
-        <div className="form-grid">
-          <label className="form-field">
-            Nom du profil
-            <input
-              required
-              autoFocus
-              value={form.name}
-              onChange={(e) => update("name", e.target.value)}
-              placeholder="Mon atelier · Animés"
-              maxLength={100}
-            />
-          </label>
-          <label className="form-field">
-            Service
-            <select
-              value={form.kind}
-              onChange={(e) => {
-                const kind = e.target.value as ProviderKind;
-                setForm((old) => ({
-                  ...old,
-                  kind,
-                  base_url: kinds.find((k) => k.id === kind)!.base,
-                }));
-              }}
-            >
-              {kinds.map((kind) => (
-                <option key={kind.id} value={kind.id}>
-                  {kind.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
         <label className="form-field">
-          Identifiant du modèle
-          <input
-            required
-            value={form.model}
-            onChange={(e) => update("model", e.target.value)}
-            placeholder="Identifiant du modèle fourni par le service"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <small>
-            Saisissez le nom exact disponible sur votre compte ou votre serveur.
-          </small>
+          Fournisseur
+          <select
+            autoFocus
+            value={form.kind}
+            onChange={(e) => {
+              const nextKind = e.target.value as ProviderKind;
+              invalidateCatalog();
+              setManual(false);
+              setReveal(false);
+              setForm((old) => ({
+                ...old,
+                kind: nextKind,
+                model: "",
+                api_key: "",
+                base_url: kinds.find((item) => item.id === nextKind)!.base,
+              }));
+            }}
+          >
+            {kinds.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
         </label>
+        {local && endpoint}
         <label className="form-field">
-          URL de l’API
-          <input
-            type="url"
-            value={form.base_url}
-            onChange={(e) => update("base_url", e.target.value)}
-            required={["ollama", "custom"].includes(form.kind)}
-            placeholder={
-              form.kind === "ollama"
-                ? "http://votre-serveur:11434"
-                : "https://votre-endpoint/v1"
-            }
-            spellCheck={false}
-          />
-          <small>
-            {form.kind === "ollama"
-              ? "Adresse joignable depuis le conteneur Sillage, y compris sur une autre machine du réseau."
-              : "Modifiable pour les proxys et les endpoints compatibles."}
-          </small>
-        </label>
-        <label className="form-field">
-          Clé API
-          {provider.has_key && (
+          Clé API{local && <span className="optional">Facultative</span>}
+          {savedKey && (
             <span className="saved-key">
               <Check size={12} />
-              Une clé est déjà enregistrée
+              Clé enregistrée
             </span>
           )}
           <div className="secret-input">
@@ -493,13 +546,17 @@ function ProviderForm({
               type={reveal ? "text" : "password"}
               value={form.api_key}
               onChange={(e) => update("api_key", e.target.value)}
+              onBlur={() => {
+                if (form.api_key?.trim() && !catalog) void loadModels();
+              }}
+              required={!local && !savedKey}
               autoComplete="new-password"
               placeholder={
-                provider.has_key
-                  ? "Laisser vide pour conserver la clé actuelle"
-                  : form.kind === "ollama"
-                    ? "Facultative pour Ollama"
-                    : "Clé du service"
+                savedKey
+                  ? "Laisser vide pour conserver la clé"
+                  : local
+                    ? "Si votre serveur demande une clé"
+                    : "Votre clé API"
               }
               spellCheck={false}
             />
@@ -507,62 +564,171 @@ function ProviderForm({
               {reveal ? "Masquer" : "Afficher"}
             </button>
           </div>
-          <small>
-            Transmise au serveur à l’enregistrement. Jamais conservée dans le
-            stockage local du navigateur.
-          </small>
+          <small>La clé sera chiffrée sur le serveur à l’enregistrement.</small>
         </label>
-        <div className="form-divider" />
-        <div className="form-grid">
-          <label className="form-field">
-            Langue source
+        <div className="form-field model-discovery">
+          <div className="model-discovery-heading">
+            <label htmlFor="provider-model">Modèle</label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void loadModels()}
+              disabled={loadingModels || !readyToLoad}
+            >
+              {loadingModels ? (
+                <Loader2 size={14} className="spin" />
+              ) : (
+                <Cpu size={14} />
+              )}
+              {loadingModels
+                ? "Chargement…"
+                : catalog
+                  ? "Actualiser les modèles"
+                  : "Charger les modèles"}
+            </Button>
+          </div>
+          {manual ? (
             <input
-              value={form.source_language}
-              onChange={(e) => update("source_language", e.target.value)}
+              id="provider-model"
+              aria-label="Identifiant du modèle"
               required
-              placeholder="en"
-              maxLength={30}
+              value={form.model}
+              onChange={(e) => update("model", e.target.value)}
+              placeholder="Identifiant exact fourni par le service"
+              autoComplete="off"
+              spellCheck={false}
             />
-          </label>
-          <label className="form-field">
-            Langue cible
-            <input
-              value={form.target_language}
-              onChange={(e) => update("target_language", e.target.value)}
-              required
-              placeholder="fr"
-              maxLength={30}
-            />
-          </label>
+          ) : (
+            <>
+              {(catalog?.models.length || 0) > 8 && (
+                <input
+                  type="search"
+                  aria-label="Rechercher un modèle"
+                  placeholder="Rechercher un modèle…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              )}
+              <select
+                id="provider-model"
+                required
+                value={form.model}
+                onChange={(e) => update("model", e.target.value)}
+                disabled={loadingModels || (!catalog && !form.model)}
+              >
+                <option value="">
+                  {catalog
+                    ? "Choisir un modèle"
+                    : "Chargez les modèles pour choisir"}
+                </option>
+                {currentMissing && (
+                  <option value={form.model}>
+                    {form.model} · sélection actuelle
+                  </option>
+                )}
+                {filtered.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name === model.id
+                      ? model.id
+                      : `${model.name} · ${model.id}`}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          {loadingModels && (
+            <small role="status">
+              Lecture des modèles disponibles sur le service…
+            </small>
+          )}
+          {catalog && !loadingModels && (
+            <small role="status">
+              {catalog.models.length === 0
+                ? "Le service n’a renvoyé aucun modèle de texte. La saisie manuelle reste disponible."
+                : `${catalog.models.length} modèle${catalog.models.length > 1 ? "s" : ""} reçu${catalog.models.length > 1 ? "s" : ""} du service.`}
+              {catalog.truncated &&
+                " Liste partielle : un autre identifiant peut être saisi manuellement."}
+            </small>
+          )}
+          {catalog && search && !filtered.length && (
+            <small>Aucun modèle ne correspond à cette recherche.</small>
+          )}
+          {modelError && <ErrorNotice error={modelError} />}
+          <button
+            type="button"
+            className="model-manual-toggle"
+            onClick={() => setManual(!manual)}
+          >
+            {manual ? "Choisir dans la liste" : "Saisir un modèle manuellement"}
+          </button>
         </div>
         <label className="form-field">
-          Glossaire et consignes de la série
-          <span className="optional">Facultatif</span>
-          <textarea
-            rows={4}
-            value={form.glossary}
-            onChange={(e) => update("glossary", e.target.value)}
+          Nom du profil<span className="optional">Facultatif</span>
+          <input
+            value={form.name}
+            onChange={(e) => update("name", e.target.value)}
             placeholder={
-              "Un terme ou une consigne par ligne.\nConserver les noms propres et les honorifiques."
+              form.model
+                ? `${kind.label} · ${form.model}`
+                : "Nom automatique à partir du modèle"
             }
+            maxLength={100}
           />
-          <small>
-            Le glossaire est associé à ce profil. Dupliquez vos profils par
-            série pour garder des termes cohérents.
-          </small>
         </label>
         <button
           className="advanced-toggle"
           type="button"
           onClick={() => setAdvanced(!advanced)}
           aria-expanded={advanced}
+          aria-controls="provider-advanced"
         >
           <Settings2 size={15} />
           Réglages avancés
           <ChevronDown size={14} className={advanced ? "rotate" : ""} />
         </button>
+        {!advanced && (
+          <small className="provider-defaults">
+            {form.source_language.toUpperCase()} →{" "}
+            {form.target_language.toUpperCase()} · Langues, glossaire et limites
+            personnalisables
+          </small>
+        )}
         {advanced && (
-          <div className="advanced-fields">
+          <div className="advanced-fields" id="provider-advanced">
+            {!local && endpoint}
+            <div className="form-grid">
+              <label className="form-field">
+                Langue source
+                <input
+                  value={form.source_language}
+                  onChange={(e) => update("source_language", e.target.value)}
+                  required
+                  maxLength={30}
+                />
+              </label>
+              <label className="form-field">
+                Langue cible
+                <input
+                  value={form.target_language}
+                  onChange={(e) => update("target_language", e.target.value)}
+                  required
+                  maxLength={30}
+                />
+              </label>
+            </div>
+            <label className="form-field">
+              Glossaire et consignes de la série
+              <textarea
+                rows={3}
+                value={form.glossary}
+                onChange={(e) => update("glossary", e.target.value)}
+                placeholder="Conserver les noms propres. Un terme ou une consigne par ligne."
+              />
+              <small>
+                Ces termes s’appliquent aux traductions de ce profil.
+              </small>
+            </label>
             <div className="form-grid three">
               <label className="form-field">
                 Taille des lots
@@ -574,7 +740,7 @@ function ProviderForm({
                   value={form.batch_size}
                   onChange={(e) => update("batch_size", Number(e.target.value))}
                 />
-                <small>Segments par requête</small>
+                <small>Répliques par requête</small>
               </label>
               <label className="form-field">
                 Concurrence
@@ -582,13 +748,13 @@ function ProviderForm({
                   type="number"
                   required
                   min={1}
-                  max={4}
+                  max={8}
                   value={form.concurrency}
                   onChange={(e) =>
                     update("concurrency", Number(e.target.value))
                   }
                 />
-                <small>Gardez 1 pour ménager le NAS</small>
+                <small>Une requête à la fois par défaut</small>
               </label>
               <label className="form-field">
                 Température
@@ -615,7 +781,7 @@ function ProviderForm({
                 <input
                   required
                   type="number"
-                  min={5}
+                  min={1}
                   max={600}
                   value={form.timeout}
                   onChange={(e) => update("timeout", Number(e.target.value))}
@@ -637,10 +803,18 @@ function ProviderForm({
         )}
         {save.isError && <ErrorNotice error={message(save.error)} />}
         <div className="modal-footer form-footer">
-          <Button variant="outline" onClick={onClose} disabled={save.isPending}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={save.isPending}
+          >
             Annuler
           </Button>
-          <Button type="submit" disabled={save.isPending}>
+          <Button
+            type="submit"
+            disabled={save.isPending || !form.model.trim() || loadingModels}
+          >
             {save.isPending ? (
               <Loader2 className="spin" size={15} />
             ) : (

@@ -25,6 +25,15 @@ class TestProvider(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        raw = json.dumps({"data": [{"id": "sillage-test-only", "name": "Modèle de test"},
+                                   {"id": "sillage-alternate-test-only", "name": "Autre modèle de test"}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         request = json.loads(payload["messages"][-1]["content"])

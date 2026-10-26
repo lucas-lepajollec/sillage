@@ -29,8 +29,12 @@ jobs:
           enable-cache: true
       - name: Prepare smoke-test dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          # Prefer Ubuntu's official HTTPS archive over the slow Azure mirror.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|' /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update -qq
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y --no-install-recommends ffmpeg
           uv sync --frozen --extra dev
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Build production image

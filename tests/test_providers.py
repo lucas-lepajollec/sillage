@@ -72,11 +72,14 @@ def test_protocols_use_real_documented_endpoints(kind, path):
     assert not request.url.query
     body = json.loads(request.content)
     assert "temperature" not in body
+    assert body.get("thinking") == ({"type": "disabled"} if kind == "deepseek" else None)
     if kind == "gemini":
         assert request.headers["x-goog-api-key"] == "synthetic-test-value"
         assert body["generationConfig"]["responseMimeType"] == "application/json"
     elif kind == "anthropic":
         assert request.headers["anthropic-version"] == "2023-06-01"
+        assert request.headers["x-api-key"] == "synthetic-test-value"
+        assert "authorization" not in request.headers
         assert body["max_tokens"] >= 256
     elif kind == "ollama":
         assert "authorization" not in request.headers

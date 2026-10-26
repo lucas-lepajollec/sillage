@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import __version__
 from .jobs import Worker
 from .media import MediaLibrary
+from .models import discover_models
 from .providers import ProviderConfig, test_connection
 from .storage import Store
 from .subtitles import SubtitleDocument
@@ -44,6 +45,14 @@ class JobRequest(BaseModel):
     provider_id: str = Field(max_length=100)
     sync_mode: str = "preserve"
     offset_ms: int = Field(default=0, ge=-600000, le=600000)
+
+
+class ModelListRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    id: str | None = Field(default=None, max_length=128)
+    kind: str = Field(max_length=30)
+    base_url: str = Field(default="", max_length=2048)
+    api_key: str = Field(default="", max_length=8192, repr=False)
 
 
 def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, *, run_worker: bool = True) -> FastAPI:
@@ -138,6 +147,18 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
     @app.post("/api/providers")
     def save_provider(data: ProviderConfig):
         return store.save_provider(data.model_dump())
+
+    @app.post("/api/providers/models")
+    async def provider_models(data: ModelListRequest):
+        # Reuse a saved secret only for its original provider and endpoint.
+        # Catalogue lookup never saves a draft or returns a credential.
+        config = ProviderConfig(kind=data.kind, base_url=data.base_url, api_key=data.api_key, model="model-discovery")
+        if data.id and not config.api_key:
+            saved = ProviderConfig.model_validate(store.provider(data.id, secrets=True))
+            if saved.kind != config.kind or saved.base_url != config.base_url:
+                raise ValueError("Ajoutez une clé pour ce nouveau fournisseur ou cette nouvelle URL.")
+            config = config.model_copy(update={"api_key": saved.api_key})
+        return await discover_models(config)
 
     @app.delete("/api/providers/{pid}")
     def delete_provider(pid: str):

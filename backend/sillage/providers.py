@@ -1,4 +1,4 @@
-"""Small, explicit HTTP adapters. No credential discovery, logging, or model catalogue.
+"""Small HTTP translation adapters. No credential discovery, logging, or bundled catalogue.
 
 translate handles one worker-owned batch; workers own concurrency and checkpoints.
 An injected AsyncClient permits protocol tests without contacting real providers.
@@ -28,6 +28,8 @@ DEFAULT_BASE_URLS = {
 }
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_BATCH_CHARACTERS = 300_000
+MIN_OUTPUT_TOKENS = 2048
+MAX_OUTPUT_TOKENS = 8192
 TOKEN_RE = re.compile(
     r"__SILLAGE_[A-Za-z0-9_]+?__|__PH_\d+__|⟦[^⟧]+⟧|<\|[^|]+\|>"
     r"|\{\\[^{}]*\}|<[^>\n]+>|\\[Nnh]|\{\{[^{}]+\}\}|\{[A-Za-z_]\w*\}"
@@ -36,6 +38,18 @@ TOKEN_RE = re.compile(
 
 class ProviderError(ValueError):
     """Safe to display: never contains a provider body, URL, key, or source text."""
+
+
+class _OutputLimitError(ValueError):
+    """The generation reached its output limit, even if its JSON looks complete."""
+
+
+class _FormattingError(ValueError):
+    """A translation changed protected subtitle formatting."""
+
+
+class _InterruptedGenerationError(ValueError):
+    """A provider interrupted generation; smaller batches are not a repair."""
 
 
 class ProviderConfig(BaseModel):
@@ -173,7 +187,7 @@ def _request(config: ProviderConfig, system: str, user: str, budget: int) -> tup
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
                 "generationConfig": generation}
     elif config.kind == "anthropic":
-        headers.update({"Authorization": f"Bearer {config.api_key}", "anthropic-version": "2023-06-01"})
+        headers.update({"x-api-key": config.api_key, "anthropic-version": "2023-06-01"})
         url = base if base.endswith("/messages") else base + "/messages"
         body = {"model": config.model, "system": system, "messages": [{"role": "user", "content": user}],
                 "stream": False, "max_tokens": budget}
@@ -202,6 +216,10 @@ def _request(config: ProviderConfig, system: str, user: str, budget: int) -> tup
         # Custom servers may lack JSON mode. The same strict local validator applies.
         if config.kind != "custom":
             body["response_format"] = {"type": "json_object"}
+        if config.kind == "deepseek":
+            # As in TraDoc, reserve the completion for translation. DeepSeek's
+            # default thinking mode otherwise shares this budget with reasoning.
+            body["thinking"] = {"type": "disabled"}
     return url, headers, body
 
 
@@ -240,22 +258,38 @@ def _usage(data: dict, kind: str) -> dict[str, int]:
 
 def _content(data: dict, kind: str) -> str:
     if kind == "anthropic":
-        if data.get("stop_reason") != "end_turn" or (data.get("stop_details") or {}).get("type") == "refusal":
+        if data.get("stop_reason") == "refusal" or (data.get("stop_details") or {}).get("type") == "refusal":
+            raise ProviderError("Le fournisseur a refusé cette traduction. Aucun résultat partiel n’a été accepté.")
+        if data.get("stop_reason") == "max_tokens":
+            raise _OutputLimitError
+        if data.get("stop_reason") != "end_turn":
             raise ValueError("Incomplete or refused generation")
         return "".join(part["text"] for part in data["content"] if part.get("type") == "text")
     if kind == "gemini":
         candidate = data["candidates"][0]
+        if candidate.get("finishReason") in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}:
+            raise ProviderError("Le fournisseur a refusé cette traduction. Aucun résultat partiel n’a été accepté.")
+        if candidate.get("finishReason") == "MAX_TOKENS":
+            raise _OutputLimitError
         if candidate.get("finishReason") != "STOP":
             raise ValueError("Incomplete generation")
         return "".join(part["text"] for part in candidate["content"]["parts"]
                        if "text" in part and not part.get("thought"))
     if kind == "ollama":
+        if data.get("done_reason") == "length":
+            raise _OutputLimitError
         if data.get("done") is not True or data.get("done_reason", "stop") != "stop":
             raise ValueError("Incomplete generation")
         return data["message"]["content"]
     choice = data["choices"][0]
-    if choice.get("finish_reason") != "stop" or choice["message"].get("refusal"):
-        raise ValueError("Incomplete or refused generation")
+    if choice.get("finish_reason") == "content_filter" or choice["message"].get("refusal"):
+        raise ProviderError("Le fournisseur a refusé cette traduction. Vérifiez ses règles de contenu ; aucun résultat partiel n’a été accepté.")
+    if choice.get("finish_reason") == "length":
+        raise _OutputLimitError
+    if choice.get("finish_reason") in {"aborted", "insufficient_system_resource"}:
+        raise _InterruptedGenerationError
+    if choice.get("finish_reason") != "stop":
+        raise ValueError("Incomplete generation")
     return choice["message"]["content"]
 
 
@@ -281,11 +315,11 @@ def _translations(content: str, segments: list[dict[str, str]]) -> dict[str, str
                 or any(unicodedata.category(ch) in {"Cc", "Cs", "Zl", "Zp"} for ch in text)):
             raise ValueError("Invalid translated text")
         if TOKEN_RE.findall(expected[cue_id]) != TOKEN_RE.findall(text):
-            raise ValueError("Formatting tokens changed")
+            raise _FormattingError("Formatting tokens changed")
         # Masked inputs must not acquire new raw subtitle formatting or line breaks.
         if (not any(ch in TOKEN_RE.sub("", expected[cue_id]) for ch in "{}\\<>")
                 and any(ch in TOKEN_RE.sub("", text) for ch in "{}\\<>")):
-            raise ValueError("New raw formatting in a masked cue")
+            raise _FormattingError("New raw formatting in a masked cue")
         result[cue_id] = text.strip()
     if set(result) != set(expected):
         raise ValueError("Missing source IDs")
@@ -320,9 +354,10 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                     client: httpx.AsyncClient | None = None) -> dict[str, Any]:
     """Translate one exact-ID batch; reject invalid results before any checkpoint write.
 
-    Additional attempts are bounded by retries (0..5). Usage includes all parseable
-    responses, including structurally invalid attempts; failed requests may be billed
-    by a provider without reporting usage, so these counts are not a cost estimate.
+    Additional whole-batch attempts are bounded by retries (0..5). A persistently
+    invalid batch can be split once into two single-attempt halves when retries
+    are enabled. No partial batch reaches the worker. Usage includes all parseable
+    responses; it is not a billing total when failed requests omit usage.
     """
     settings = _config(config)
     source = _segments(segments)
@@ -332,14 +367,18 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
     terms = glossary or settings.glossary
     if not isinstance(terms, str) or len(terms) > 20_000:
         raise ProviderError("Le glossaire est trop volumineux.")
-    budget = max(256, min(8192, sum(len(item["text"]) for item in source) * 2 + 256))
+    # Include cue IDs, JSON syntax and non-ASCII text, not just dialogue length.
+    expected_bytes = len(json.dumps({"translations": source}, ensure_ascii=False).encode("utf-8"))
+    budget = max(MIN_OUTPUT_TOKENS, min(MAX_OUTPUT_TOKENS, expected_bytes * 2 + 512))
     owned_client = client is None
     http = client or httpx.AsyncClient(trust_env=False, follow_redirects=False)
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète. Réduisez la taille du lot ou vérifiez le modèle."
+    error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète."
     repair = False
+    recoverable = False
     try:
         for attempt in range(settings.retries + 1):
+            recoverable = False
             system, user = _prompts(settings, source, surroundings, terms, repair)
             url, headers, body = _request(settings, system, user, budget)
             delay = min(8.0, 0.5 * 2 ** attempt)
@@ -378,11 +417,38 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                 error = "Le fournisseur n’a pas répondu à temps. Vérifiez la connexion ou augmentez le délai d’attente."
             except httpx.RequestError:
                 error = "La connexion au fournisseur a échoué. Vérifiez son URL et l’accès réseau."
+            except _OutputLimitError:
+                error = "La réponse du fournisseur a atteint sa limite de sortie avant la fin de la traduction. Aucun résultat partiel n’a été accepté."
+                budget = min(MAX_OUTPUT_TOKENS, budget * 2)
+                repair = recoverable = True
+            except _FormattingError:
+                error = "La traduction JSON est invalide ou incomplète : le fournisseur a modifié des balises protégées. Aucun résultat partiel n’a été accepté."
+                repair = recoverable = True
+            except _InterruptedGenerationError:
+                error = "Le fournisseur a interrompu la génération avant sa fin. Réessayez plus tard ; aucun résultat partiel n’a été accepté."
             except (ValueError, KeyError, TypeError, IndexError, AttributeError):
-                error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète. Réduisez la taille du lot ou vérifiez le modèle."
-                repair = True
+                error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète : réponse vide, structure ou répliques non conformes. Aucun résultat partiel n’a été accepté."
+                repair = recoverable = True
             if attempt < settings.retries:
                 await asyncio.sleep(delay)
+        if recoverable and settings.retries > 0 and len(source) > 1:
+            # TraDoc also recovers structure failures in smaller subgroups.
+            # One split only, with no nested retries: at most retries+3 calls.
+            midpoint = len(source) // 2
+            output: dict[str, str] = {}
+            warnings: list[str] = []
+            single_attempt = settings.model_copy(update={"retries": 0})
+            for batch in (source[:midpoint], source[midpoint:]):
+                batch_ids = {item["id"] for item in batch}
+                adjacent = [item | ({"translated": output[item["id"]]} if item["id"] in output else {})
+                            for item in source if item["id"] not in batch_ids]
+                result = await translate(single_attempt, batch, surroundings + adjacent, terms, client=http)
+                output.update(result["translations"])
+                for key in usage:
+                    usage[key] += result["usage"][key]
+                warnings.extend(w for w in result["warnings"] if w not in warnings)
+            warnings.extend(w for w in _language_warnings(settings, source, output) if w not in warnings)
+            return {"translations": output, "usage": usage, "warnings": warnings}
         raise ProviderError(error) from None
     finally:
         if owned_client:
