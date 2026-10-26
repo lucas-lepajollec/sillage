@@ -40,9 +40,16 @@ const kinds: { id: ProviderKind; label: string; base: string }[] = [
     label: "OpenRouter",
     base: "https://openrouter.ai/api/v1",
   },
+  { id: "groq", label: "Groq", base: "https://api.groq.com/openai/v1" },
+  { id: "mistral", label: "Mistral", base: "https://api.mistral.ai/v1" },
+  { id: "xai", label: "xAI / Grok", base: "https://api.x.ai/v1" },
   { id: "ollama", label: "Ollama", base: "" },
+  { id: "lmstudio", label: "LM Studio", base: "" },
+  { id: "vllm", label: "vLLM", base: "" },
+  { id: "llamacpp", label: "llama.cpp", base: "" },
   { id: "custom", label: "Serveur compatible OpenAI", base: "" },
 ];
+const localKinds = new Set<ProviderKind>(["ollama", "lmstudio", "vllm", "llamacpp", "custom"]);
 const emptyProvider = (): Provider => ({
   name: "",
   kind: "openai",
@@ -170,13 +177,7 @@ export function Providers({
               locaux.
             </Empty>
             <div className="provider-types">
-              <span>OpenAI</span>
-              <span>Anthropic</span>
-              <span>Gemini</span>
-              <span>DeepSeek</span>
-              <span>OpenRouter</span>
-              <span>Ollama</span>
-              <span>OpenAI compatible</span>
+              {kinds.map((kind) => <span key={kind.id}>{kind.label}</span>)}
             </div>
           </div>
         )}
@@ -187,10 +188,10 @@ export function Providers({
                 <span
                   className={cn(
                     "provider-icon",
-                    provider.kind === "ollama" && "local",
+                    localKinds.has(provider.kind) && "local",
                   )}
                 >
-                  {provider.kind === "ollama" ? (
+                  {localKinds.has(provider.kind) ? (
                     <Server size={21} />
                   ) : (
                     <Cpu size={21} />
@@ -234,7 +235,7 @@ export function Providers({
                   <KeyRound size={13} />
                   {provider.has_key
                     ? "Clé enregistrée"
-                    : provider.kind === "ollama"
+                    : localKinds.has(provider.kind)
                       ? "Serveur local"
                       : "Sans clé"}
                 </span>
@@ -392,7 +393,8 @@ function ProviderForm({
   const [search, setSearch] = useState("");
   const requestId = useRef(0);
   const loadingRef = useRef(false);
-  const local = form.kind === "ollama" || form.kind === "custom";
+  const local = localKinds.has(form.kind);
+  const selectedWarning = catalog?.models.find((model) => model.id === form.model)?.warning;
   const sameService =
     form.kind === provider.kind && form.base_url === provider.base_url;
   const savedKey = sameService && provider.has_key;
@@ -475,15 +477,21 @@ function ProviderForm({
         placeholder={
           form.kind === "ollama"
             ? "http://votre-serveur:11434"
-            : "http://votre-serveur:1234/v1"
+            : form.kind === "lmstudio"
+              ? "http://votre-serveur:1234/api/v1"
+              : form.kind === "llamacpp"
+                ? "http://votre-serveur:8080/v1"
+                : "http://votre-serveur:8000/v1"
         }
         spellCheck={false}
       />
       <small>
         {form.kind === "ollama"
           ? "Adresse de votre serveur Ollama, joignable depuis Sillage."
-          : form.kind === "custom"
-            ? "LM Studio, llama.cpp, vLLM ou tout service proposant une API compatible OpenAI."
+          : form.kind === "lmstudio"
+            ? "API native LM Studio : ajoutez /api/v1 à l’adresse du serveur."
+            : ["custom", "vllm", "llamacpp"].includes(form.kind)
+              ? "API compatible OpenAI : ajoutez /v1 à l’adresse du serveur."
             : "Adresse du service, à modifier uniquement si vous utilisez un proxy."}
       </small>
     </label>
@@ -632,6 +640,7 @@ function ProviderForm({
                     {model.name === model.id
                       ? model.id
                       : `${model.name} · ${model.id}`}
+                    {model.reasoning === "mandatory" ? " · raisonnement obligatoire" : ""}
                   </option>
                 ))}
               </select>
@@ -663,6 +672,9 @@ function ProviderForm({
             {manual ? "Choisir dans la liste" : "Saisir un modèle manuellement"}
           </button>
         </div>
+        <small className="provider-defaults" role={selectedWarning ? "status" : undefined}>
+          {selectedWarning || "Le raisonnement est désactivé quand le modèle le permet. S’il est obligatoire, la traduction continue avec un avertissement sur le délai et les tokens."}
+        </small>
         <label className="form-field">
           Nom du profil<span className="optional">Facultatif</span>
           <input

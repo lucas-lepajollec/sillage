@@ -283,7 +283,8 @@ async def test_adaptive_feedback_changes_next_wave_and_survives_resume_and_next_
             await reopened.process(job['id'])
         assert [len(batch) for batch in calls] == [1]*4
         assert all(batch[0] > 'e000004' for batch in calls)
-        assert store.job(job['id'])['status'] == 'completed'
+        assert store.job(job['id'])['status'] == 'review'
+        assert any('raisonnement' in w for w in store.job(job['id'])['warnings'])
         second = video.with_name('Another episode.mkv')
         shutil.copyfile(video, second)
         second_source = second.with_suffix('.en.srt')
@@ -387,3 +388,22 @@ async def test_user_cancellation_stops_inflight_recovery_and_queue_continues(vid
             assert store.job(second['id'])['status'] == 'completed'
         finally:
             await worker.stop()
+
+
+async def test_reasoning_warning_survives_resume_after_all_cues_were_checkpointed(video, tmp_path):
+    from sillage.reasoning import MANDATORY
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    async def translate_with_warning(*args):
+        result = await deterministic(*args)
+        return result | {'warnings': [MANDATORY]}
+    with patch('sillage.jobs.providers.translate', side_effect=translate_with_warning), patch.object(worker, 'finalize', side_effect=ValueError('interrupted before publication')):
+        with pytest.raises(ValueError, match='interrupted before publication'):
+            await worker.process(job['id'])
+    store.patch(job['id'], status='error')
+    worker.resume(job['id'])
+    with patch('sillage.jobs.providers.translate', side_effect=AssertionError('Validated cues must not be billed again')):
+        await worker.process(job['id'])
+    result = store.job(job['id'])
+    assert result['status'] == 'review' and result['output']
+    assert result['warnings'].count(MANDATORY) == 1

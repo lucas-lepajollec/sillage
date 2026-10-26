@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-26
+
+- Prefer no reasoning across all provider adapters, using each API's controls and bounded capability discovery for Ollama, OpenRouter and LM Studio. Models requiring reasoning keep working with the lowest configurable effort and explicit time/token warnings.
+- Add Groq, Mistral, xAI/Grok, native LM Studio, vLLM and llama.cpp profiles, live model discovery and optional authentication for local services. Use Responses for known OpenAI Pro models that require that endpoint.
+- Detect provider-reported reasoning without retaining its text; expose warnings in model selection, connection tests and jobs, including failed batches and resumes with all cues already checkpointed. Unsupported off parameters are never silently removed after an HTTP error.
+- Keep adaptive batch recovery, strict IDs/formatting, source timings, encrypted keys and existing checkpoints. Unknown compatible servers stay usable with a warning that disabling reasoning cannot be confirmed.
+
 ## 0.2.2 — 2026-10-26
 
 - Start with conservative cloud/local batch ceilings and a UTF-8 byte limit. Reduce invalid batches progressively down to a single cue instead of requiring manual episode restarts; remember reduced ceilings for the same unchanged provider profile/configuration across waves, resumes and recent episodes.

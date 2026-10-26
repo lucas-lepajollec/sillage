@@ -8,6 +8,7 @@ import unicodedata
 import httpx
 
 from .providers import ProviderConfig, ProviderError, _json
+from .reasoning import LOCAL_KINDS, policy_for
 
 MAX_CATALOG_BYTES = 4_000_000
 MAX_MODELS = 2000
@@ -18,7 +19,7 @@ MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,199}\Z")
 def _endpoint(config: ProviderConfig) -> tuple[str, dict, dict]:
     headers = {"Accept": "application/json"}
     params: dict[str, str | int] = {}
-    if config.kind not in {"ollama", "custom"} and not config.api_key:
+    if config.kind not in LOCAL_KINDS and not config.api_key:
         raise ProviderError("Ajoutez votre clé API pour charger les modèles de ce fournisseur.")
     if config.kind == "gemini":
         headers["x-goog-api-key"] = config.api_key
@@ -49,6 +50,10 @@ def _model(item: dict, config: ProviderConfig) -> dict[str, str] | None:
         name = item.get("displayName")
     elif config.kind == "ollama":
         identifier, name = item.get("name", item.get("model")), item.get("name")
+    elif config.kind == "lmstudio":
+        if item.get("type") != "llm":
+            return None
+        identifier, name = item.get("key"), item.get("display_name")
     else:
         identifier, name = item.get("id"), item.get("display_name", item.get("name"))
         modalities = item.get("output_modalities")
@@ -64,7 +69,12 @@ def _model(item: dict, config: ProviderConfig) -> dict[str, str] | None:
             or any(unicodedata.category(ch).startswith("C") for ch in name)
             or (config.api_key and config.api_key in name)):
         name = identifier
-    return {"id": identifier, "name": name.strip()}
+    result = {"id": identifier, "name": name.strip()}
+    policy = policy_for(config.kind, identifier, item)
+    if policy.status == "mandatory":
+        result["reasoning"] = "mandatory"
+        result["warning"] = policy.warnings[0]
+    return result
 
 
 async def discover_models(config: ProviderConfig, *, client: httpx.AsyncClient | None = None) -> dict:
@@ -97,7 +107,7 @@ async def discover_models(config: ProviderConfig, *, client: httpx.AsyncClient |
                     data = _json(b"".join(chunks))
                 if not isinstance(data, dict):
                     raise ValueError
-                items = data.get("models" if config.kind in {"gemini", "ollama"} else "data")
+                items = data.get("models" if config.kind in {"gemini", "ollama", "lmstudio"} else "data")
                 if not isinstance(items, list):
                     raise ValueError
                 for item in items:

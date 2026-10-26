@@ -177,12 +177,13 @@ def test_output_limit_has_a_specific_diagnostic_even_with_complete_json():
         invoke(lambda request: httpx.Response(200, json=data))
 
 
-@pytest.mark.parametrize('kind', ['openai', 'deepseek', 'anthropic', 'gemini', 'ollama', 'openrouter', 'custom'])
+@pytest.mark.parametrize('kind', ['openai', 'deepseek', 'anthropic', 'gemini', 'ollama', 'openrouter', 'custom', 'groq', 'mistral', 'xai', 'lmstudio', 'vllm', 'llamacpp'])
 def test_model_that_only_handles_single_cues_recovers_without_manual_restart(kind):
     sizes = []
     def handler(request):
         body = json.loads(request.content)
         content = (body['contents'][0]['parts'][0]['text'] if kind == 'gemini'
+                   else body['input'] if kind == 'lmstudio'
                    else body['messages'][0]['content'] if kind == 'anthropic'
                    else body['messages'][1]['content'])
         batch = json.loads(content)['segments']
@@ -249,6 +250,7 @@ def test_native_provider_interruption_never_splits(kind):
     def handler(request):
         body = json.loads(request.content)
         content = (body['contents'][0]['parts'][0]['text'] if kind == 'gemini'
+                   else body['input'] if kind == 'lmstudio'
                    else body['messages'][0]['content'] if kind == 'anthropic'
                    else body['messages'][1]['content'])
         sizes.append(len(json.loads(content)['segments']))

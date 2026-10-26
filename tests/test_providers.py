@@ -25,12 +25,14 @@ def output(items=None):
 def envelope(kind="openai", text=None):
     text = text if text is not None else output()
     if kind == "anthropic":
-        return {"content": [{"type": "thinking", "thinking": "ignored"}, {"type": "text", "text": text}],
+        return {"content": [{"type": "text", "text": text}],
                 "stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 5}}
     if kind == "gemini":
         return {"candidates": [{"finishReason": "STOP", "content": {"parts": [
-            {"thought": True, "text": "ignored"}, {"text": text}]}}],
+            {"text": text}]}}],
             "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15}}
+    if kind == "lmstudio":
+        return {"output": [{"type": "message", "content": text}], "stats": {"input_tokens": 10, "total_output_tokens": 5}}
     if kind == "ollama":
         return {"done": True, "done_reason": "stop", "message": {"content": text},
                 "prompt_eval_count": 10, "eval_count": 5}
@@ -39,8 +41,18 @@ def envelope(kind="openai", text=None):
 
 
 def invoke(handler, *, settings=None, segments=None, context=None, glossary=""):
+    def transport(request):
+        if request.url.path.endswith("/api/show"):
+            return httpx.Response(200, json={"thinking": {"values": [False, True]}})
+        if request.method == "GET" and request.url.path.endswith("/models"):
+            selected = settings or config()
+            if selected['kind'] == 'lmstudio':
+                return httpx.Response(200, json={'models': [{'key': selected['model'], 'type': 'llm',
+                    'capabilities': {'reasoning': {'allowed_options': ['off', 'on']}}}]})
+            return httpx.Response(200, json={"data": [{"id": selected["model"], "reasoning": {"mandatory": False}}]})
+        return handler(request)
     async def perform():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
             return await translate(settings or config(), segments or [{"id": "a", "text": "Hello."}],
                                    context or [], glossary, client=client)
     return run(perform())
@@ -50,7 +62,9 @@ def invoke(handler, *, settings=None, segments=None, context=None, glossary=""):
     ("openai", "/v1/chat/completions"), ("deepseek", "/v1/chat/completions"),
     ("openrouter", "/api/v1/chat/completions"), ("custom", "/v1/chat/completions"),
     ("anthropic", "/v1/messages"), ("gemini", "/v1beta/models/user-selected-model:generateContent"),
-    ("ollama", "/api/chat"),
+    ("ollama", "/api/chat"), ("groq", "/openai/v1/chat/completions"),
+    ("mistral", "/v1/chat/completions"), ("xai", "/v1/chat/completions"),
+    ("lmstudio", "/api/v1/chat"), ("vllm", "/v1/chat/completions"), ("llamacpp", "/v1/chat/completions"),
 ])
 def test_protocols_use_real_documented_endpoints(kind, path):
     requests = []
@@ -66,13 +80,13 @@ def test_protocols_use_real_documented_endpoints(kind, path):
     result = invoke(handler, settings=settings)
     assert result["translations"] == {"a": "Bonjour."}
     assert result["usage"] == {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-    assert result["warnings"] == []
+    assert bool(result["warnings"]) is (kind in {"custom", "gemini", "groq", "mistral", "xai", "vllm", "llamacpp"})
     request = requests[0]
     assert request.method == "POST" and request.url.path == path
     assert not request.url.query
     body = json.loads(request.content)
     assert "temperature" not in body
-    assert body.get("thinking") == ({"type": "disabled"} if kind == "deepseek" else None)
+    assert body.get("thinking") == ({"type": "disabled"} if kind in {"deepseek", "anthropic"} else None)
     if kind == "gemini":
         assert request.headers["x-goog-api-key"] == "synthetic-test-value"
         assert body["generationConfig"]["responseMimeType"] == "application/json"
@@ -81,6 +95,9 @@ def test_protocols_use_real_documented_endpoints(kind, path):
         assert request.headers["x-api-key"] == "synthetic-test-value"
         assert "authorization" not in request.headers
         assert body["max_tokens"] >= 256
+    elif kind == "lmstudio":
+        assert body["reasoning"] == "off" and body["store"] is False
+        assert request.headers["authorization"] == "Bearer synthetic-test-value"
     elif kind == "ollama":
         assert "authorization" not in request.headers
         assert body["format"] == "json" and body["stream"] is False
@@ -220,7 +237,7 @@ def test_auth_invalid_settings_and_redirects_are_never_retried(status):
     assert "synthetic-test-value" not in str(error.value)
 
 
-@pytest.mark.parametrize("kind", ["openai", "anthropic", "gemini", "deepseek", "openrouter"])
+@pytest.mark.parametrize("kind", ["openai", "anthropic", "gemini", "deepseek", "openrouter", "groq", "mistral", "xai"])
 def test_cloud_key_is_required_before_network(kind):
     def handler(request):
         pytest.fail("Network must not run without a configured key")

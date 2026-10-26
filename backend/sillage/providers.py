@@ -17,6 +17,8 @@ from urllib.parse import quote, urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from .reasoning import LOCAL_KINDS, OBSERVED, ReasoningPolicy, policy_for, reported_reasoning, resolve_policy
+
 
 DEFAULT_BASE_URLS = {
     "openai": "https://api.openai.com/v1",
@@ -25,6 +27,12 @@ DEFAULT_BASE_URLS = {
     "deepseek": "https://api.deepseek.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "ollama": "http://localhost:11434",
+    "groq": "https://api.groq.com/openai/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "xai": "https://api.x.ai/v1",
+    "lmstudio": "http://localhost:1234/api/v1",
+    "vllm": "http://localhost:8000/v1",
+    "llamacpp": "http://localhost:8080/v1",
 }
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_BATCH_CHARACTERS = 300_000
@@ -39,15 +47,20 @@ TOKEN_RE = re.compile(
 class ProviderError(ValueError):
     """Safe to display: never contains a provider body, URL, key, or source text."""
 
+    def __init__(self, message: str, warnings: list[str] | None = None):
+        super().__init__(message)
+        self.warnings = list(warnings or [])
+
 
 class StructuredOutputError(ProviderError):
     """Sanitized failure plus operational feedback; never source/response bodies."""
 
-    def __init__(self, message: str, batch_size: int, usage: dict[str, int], requests: int):
+    def __init__(self, message: str, batch_size: int, usage: dict[str, int], requests: int, warnings: list[str] | None = None):
         super().__init__(message)
         self.batch_size = batch_size
         self.usage = dict(usage)
         self.requests = requests
+        self.warnings = list(warnings or [])
 
 
 class _OutputLimitError(ValueError):
@@ -67,7 +80,10 @@ class ProviderConfig(BaseModel):
 
     id: str | None = Field(default=None, max_length=128)
     name: str = Field(default="Translation provider", min_length=1, max_length=100)
-    kind: Literal["openai", "anthropic", "gemini", "deepseek", "openrouter", "ollama", "custom"]
+    kind: Literal[
+        "openai", "anthropic", "gemini", "deepseek", "openrouter", "ollama", "groq",
+        "mistral", "xai", "lmstudio", "vllm", "llamacpp", "custom",
+    ]
     base_url: str = Field(default="", max_length=2048)
     model: str = Field(min_length=1, max_length=200)
     temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
@@ -181,18 +197,22 @@ def _prompts(config: ProviderConfig, segments: list[dict[str, str]], context: li
     return system, user
 
 
-def _request(config: ProviderConfig, system: str, user: str, budget: int) -> tuple[str, dict, dict]:
+def _request(config: ProviderConfig, system: str, user: str, budget: int,
+             policy: ReasoningPolicy | None = None) -> tuple[str, dict, dict]:
+    policy = policy or policy_for(config.kind, config.model)
     base = config.base_url
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    if config.kind not in {"ollama", "custom"} and not config.api_key:
+    if config.kind not in LOCAL_KINDS and not config.api_key:
         raise ProviderError("Ce fournisseur nécessite une clé API. Enregistrez-la dans ses paramètres.")
     if config.kind == "gemini":
         headers["x-goog-api-key"] = config.api_key
         model = quote(config.model.removeprefix("models/"), safe="")
         url = f"{base}/models/{model}:generateContent"
         generation: dict[str, Any] = {"responseMimeType": "application/json", "maxOutputTokens": budget}
-        if config.temperature is not None:
+        if config.temperature is not None and not policy.omit_temperature:
             generation["temperature"] = config.temperature
+        if policy.controls:
+            generation["thinkingConfig"] = policy.controls
         body = {"systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
                 "generationConfig": generation}
@@ -201,6 +221,20 @@ def _request(config: ProviderConfig, system: str, user: str, budget: int) -> tup
         url = base if base.endswith("/messages") else base + "/messages"
         body = {"model": config.model, "system": system, "messages": [{"role": "user", "content": user}],
                 "stream": False, "max_tokens": budget}
+        if config.temperature is not None and not policy.omit_temperature:
+            body["temperature"] = config.temperature
+    elif config.kind == "openai" and config.model.startswith(("gpt-5-pro", "gpt-5.2-pro", "gpt-5.4-pro", "o1-pro")):
+        headers["Authorization"] = f"Bearer {config.api_key}"
+        body = {"model": config.model, "instructions": system, "input": user, "store": False,
+                "stream": False, "max_output_tokens": budget, "text": {"format": {"type": "json_object"}},
+                "reasoning": {"effort": policy.controls.get("reasoning_effort", "high")}}
+        return base.removesuffix("/chat/completions") + "/responses", headers, body
+    elif config.kind == "lmstudio":
+        if config.api_key:
+            headers["Authorization"] = f"Bearer {config.api_key}"
+        url = base + "/chat"
+        body = {"model": config.model, "input": user, "system_prompt": system,
+                "max_output_tokens": budget, "stream": False, "store": False, "integrations": []}
         if config.temperature is not None:
             body["temperature"] = config.temperature
     elif config.kind == "ollama":
@@ -210,7 +244,7 @@ def _request(config: ProviderConfig, system: str, user: str, budget: int) -> tup
         body = {"model": config.model, "messages": [{"role": "system", "content": system},
                                                         {"role": "user", "content": user}],
                 "stream": False, "format": "json", "options": {"num_predict": budget}}
-        if config.temperature is not None:
+        if config.temperature is not None and not policy.omit_temperature:
             body["options"]["temperature"] = config.temperature
     else:
         if config.api_key:
@@ -220,16 +254,14 @@ def _request(config: ProviderConfig, system: str, user: str, budget: int) -> tup
                                                         {"role": "user", "content": user}],
                 "stream": False}
         # Optional sampling remains absent by default: some reasoning models reject it.
-        if config.temperature is not None:
+        if config.temperature is not None and not policy.omit_temperature:
             body["temperature"] = config.temperature
         body["max_completion_tokens" if config.kind == "openai" else "max_tokens"] = budget
         # Custom servers may lack JSON mode. The same strict local validator applies.
         if config.kind != "custom":
             body["response_format"] = {"type": "json_object"}
-        if config.kind == "deepseek":
-            # As in TraDoc, reserve the completion for translation. DeepSeek's
-            # default thinking mode otherwise shares this budget with reasoning.
-            body["thinking"] = {"type": "disabled"}
+    if config.kind != "gemini":
+        body.update(policy.controls)
     return url, headers, body
 
 
@@ -253,6 +285,10 @@ def _usage(data: dict, kind: str) -> dict[str, int]:
         raw_total = usage.get("totalTokenCount")
     elif kind == "ollama":
         raw_input, raw_output = data.get("prompt_eval_count"), data.get("eval_count")
+        raw_total = None
+    elif kind == "lmstudio":
+        stats = data.get("stats") or {}
+        raw_input, raw_output = stats.get("input_tokens"), stats.get("total_output_tokens")
         raw_total = None
     else:
         usage = data.get("usage") or {}
@@ -291,6 +327,28 @@ def _content(data: dict, kind: str) -> str:
         if data.get("done") is not True or data.get("done_reason", "stop") != "stop":
             raise _InterruptedGenerationError("Incomplete generation")
         return data["message"]["content"]
+    if kind == "openai" and "output" in data:
+        if data.get("status") == "incomplete" and (data.get("incomplete_details") or {}).get("reason") == "max_output_tokens":
+            raise _OutputLimitError
+        if data.get("status") != "completed":
+            raise _InterruptedGenerationError
+        parts = []
+        for item in data["output"]:
+            if item.get("type") == "reasoning":
+                continue
+            if item.get("type") != "message":
+                raise _InterruptedGenerationError
+            parts.extend(item["content"])
+        if any(part.get("type") == "refusal" for part in parts):
+            raise ProviderError("Le fournisseur a refusé cette traduction. Aucun résultat partiel n’a été accepté.")
+        if any(part.get("type") != "output_text" for part in parts):
+            raise _InterruptedGenerationError
+        return "".join(part["text"] for part in parts)
+    if kind == "lmstudio":
+        parts = data["output"]
+        if not isinstance(parts, list) or any(part.get("type") not in {"message", "reasoning"} for part in parts):
+            raise _InterruptedGenerationError
+        return "".join(part["content"] for part in parts if part.get("type") == "message")
     choice = data["choices"][0]
     if choice.get("finish_reason") == "content_filter" or choice["message"].get("refusal"):
         raise ProviderError("Le fournisseur a refusé cette traduction. Vérifiez ses règles de contenu ; aucun résultat partiel n’a été accepté.")
@@ -300,7 +358,12 @@ def _content(data: dict, kind: str) -> str:
         raise _InterruptedGenerationError
     if choice.get("finish_reason") != "stop":
         raise ValueError("Incomplete generation")
-    return choice["message"]["content"]
+    content = choice["message"]["content"]
+    if isinstance(content, list):
+        if any(part.get("type") not in {"text", "thinking", "reasoning"} for part in content):
+            raise _InterruptedGenerationError
+        return "".join(part["text"] for part in content if part.get("type") == "text")
+    return content
 
 
 def _translations(content: str, segments: list[dict[str, str]]) -> dict[str, str]:
@@ -372,11 +435,11 @@ def _language_warnings(config: ProviderConfig, segments: list[dict[str, str]], o
 def initial_batch_size(config: dict[str, Any] | ProviderConfig) -> int:
     """Conservative starting ceilings, not a claim about model context capacity."""
     settings = _config(config)
-    return min(settings.batch_size, 4 if settings.kind in {"ollama", "custom"} else 10)
+    return min(settings.batch_size, 4 if settings.kind in LOCAL_KINDS else 10)
 
 
 def batch_byte_limit(config: dict[str, Any] | ProviderConfig) -> int:
-    return 1600 if _config(config).kind in {"ollama", "custom"} else 4000
+    return 1600 if _config(config).kind in LOCAL_KINDS else 4000
 
 
 def take_batch(segments: list[dict[str, str]], limit: int, byte_limit: int) -> list[dict[str, str]]:
@@ -403,6 +466,8 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
     """
     settings = _config(config)
     source = _segments(segments)
+    if settings.kind not in LOCAL_KINDS and not settings.api_key:
+        raise ProviderError("Ce fournisseur nécessite une clé API. Enregistrez-la dans ses paramètres.")
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     if not source:
         return {"translations": {}, "usage": usage, "warnings": [], "requests": 0}
@@ -417,11 +482,13 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
     smallest = len(source)
     recovered = False
     learned = len(source)
+    warnings: list[str] = []
+    policy = policy_for(settings.kind, settings.model)
 
     def failure(message, batch):
         return StructuredOutputError(
             message + f" Répliques concernées : {batch[0]['id']} à {batch[-1]['id']}. "
-            "Les lots déjà validés sont conservés.", min(smallest, max(1, len(batch) // 2)), usage, requests)
+            "Les lots déjà validés sont conservés.", min(smallest, max(1, len(batch) // 2)), usage, requests, warnings)
 
     async def perform(batch, adjacent):
         nonlocal requests, smallest, recovered, learned
@@ -443,7 +510,7 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                     bounded.insert(0, cue)
                     size += cost
             system, user = _prompts(settings, batch, bounded, terms, repair)
-            url, headers, body = _request(settings, system, user, budget)
+            url, headers, body = _request(settings, system, user, budget, policy)
             delay = min(8.0, 0.5 * 2 ** attempt)
             structural = False
             truncated = False
@@ -459,7 +526,7 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                         except ValueError:
                             pass
                     elif response.status_code < 200 or response.status_code >= 300:
-                        raise ProviderError(f"Le fournisseur a refusé la requête (HTTP {response.status_code}). Vérifiez l’URL de l’API, le modèle et la température facultative.")
+                        raise ProviderError(f"Le fournisseur a refusé la requête (HTTP {response.status_code}). Vérifiez l’URL, le modèle et les paramètres de raisonnement/température acceptés par ce service. Aucun paramètre de désactivation n’a été retiré automatiquement.")
                     else:
                         chunks, size = [], 0
                         async for chunk in response.aiter_bytes():
@@ -473,8 +540,13 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                         reported = _usage(data, settings.kind)
                         for key in usage:
                             usage[key] += reported[key]
+                        if reported_reasoning(data, settings.kind) and policy.status != "mandatory" and OBSERVED not in warnings:
+                            warnings.append(OBSERVED)
+                        if settings.kind == "lmstudio" and reported["output_tokens"] >= budget:
+                            raise _OutputLimitError
                         return _translations(_content(data, settings.kind), batch)
-            except ProviderError:
+            except ProviderError as exc:
+                exc.warnings = list(dict.fromkeys(exc.warnings + warnings))
                 raise
             except httpx.TimeoutException:
                 error = "Le fournisseur n’a pas répondu à temps. Vérifiez la connexion ou augmentez le délai d’attente."
@@ -512,11 +584,15 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                     raise failure(error, batch)
             if attempt < settings.retries:
                 await asyncio.sleep(delay)
-        raise ProviderError(error) from None
+        raise ProviderError(error, warnings) from None
 
     try:
+        policy = await resolve_policy(settings, http, cache=owned_client)
+        warnings.extend(policy.warnings)
+        if settings.temperature is not None and policy.omit_temperature:
+            warnings.append("La température personnalisée a été omise car ce modèle ne l’accepte pas dans ce mode.")
         output = await perform(source, surroundings)
-        return {"translations": output, "usage": usage, "warnings": _language_warnings(settings, source, output),
+        return {"translations": output, "usage": usage, "warnings": list(dict.fromkeys(warnings + _language_warnings(settings, source, output))),
                 "requests": requests, "recovered": recovered, "batch_size": learned}
     finally:
         if owned_client:
@@ -526,8 +602,8 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
 async def test_connection(config: dict[str, Any] | ProviderConfig, *, client: httpx.AsyncClient | None = None) -> str:
     """Make one genuine, tiny structured translation call. No model-list success shortcut."""
     settings = _config(config).model_copy(update={"retries": 0})
-    await translate(settings, [{"id": "connection-check", "text": "Hello."}], [], client=client)
-    return "Connexion et réponse structurée du modèle validées."
+    result = await translate(settings, [{"id": "connection-check", "text": "Hello."}], [], client=client)
+    return " ".join(["Connexion et réponse structurée du modèle validées.", *result["warnings"]])
 
 
 # Prevent pytest from collecting this application function when directly imported.
