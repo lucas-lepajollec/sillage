@@ -72,6 +72,7 @@ def test_protocols_use_real_documented_endpoints(kind, path):
     assert not request.url.query
     body = json.loads(request.content)
     assert "temperature" not in body
+    assert body.get("thinking") == ({"type": "disabled"} if kind == "deepseek" else None)
     if kind == "gemini":
         assert request.headers["x-goog-api-key"] == "synthetic-test-value"
         assert body["generationConfig"]["responseMimeType"] == "application/json"

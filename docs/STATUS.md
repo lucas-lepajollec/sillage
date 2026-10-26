@@ -1,12 +1,12 @@
 # Verification status — 2026-10-26
 
-Sillage 0.1.0 is an initial public version for operator testing. Screenshots use fictional dialogue encoded into real generated MKVs, never a private media collection. The production app has no simulated provider.
+Sillage 0.1.1 fixes structured translation reliability in the initial public series. Screenshots use fictional dialogue encoded into real generated MKVs, never a private media collection. The production app has no simulated provider.
 
 ## Executed validation
 
 | Check | Observed result |
 | --- | --- |
-| Backend suite | **173 passing tests**: generated real media, ASS/SSA/SRT invariants, filesystem confinement/atomic exports, seven provider protocols, checkpoints/resume/cancellation, sync guards and API. |
+| Backend suite | **192 passing tests**: generated real media, ASS/SSA/SRT invariants, filesystem confinement/atomic exports, seven provider protocols, checkpoints/resume/cancellation, sync guards and API. Includes 19 output-budget/recovery regressions. |
 | Ruff | Backend, tests and maintenance scripts pass. |
 | Frontend | TypeScript and Vite production build pass. |
 | Browser | **2 Chromium workflows pass** against the real API/worker and a test-only HTTP endpoint: browse/recursive scan, selection/source preview, provider configuration/test, persisted selection, ASS/SRT translation, progress/downloads, light theme, filters/empty states and mobile. |
@@ -15,6 +15,8 @@ Sillage 0.1.0 is an initial public version for operator testing. Screenshots use
 | Publication contract | Canonical Compose is image-only, README example is identical, source builds use a separate override. Native amd64/arm64 publication jobs smoke-test immutable registry candidates before promotion. Live publication status is shown by GitHub Actions and GHCR. |
 
 One upstream Starlette/httpx test-client deprecation warning remains; it does not affect the production server. Provider protocol tests and the disposable HTTP integration fixture consume no credentials or cloud credits. A greedy placeholder-regex bug between adjacent ASS tags was discovered by the complete container test, corrected and covered by a regression.
+
+DeepSeek requests now disable default thinking, following TraDoc's provider configuration and DeepSeek's documented control. Tests simulate reasoning exhausting the completion budget, valid-looking but truncated JSON, persistent structural failures recovered in two validated halves, failure of the second half, bounded retry counts, cancellation and sanitized diagnostics. They do not establish translation quality or reproduce a private provider response. Output IDs, timing and formatting validation remain strict; existing job checkpoints need no migration.
 
 ## Acceptance still needed
 

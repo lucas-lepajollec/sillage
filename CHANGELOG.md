@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.1 — 2026-10-26
+
+- Disable DeepSeek's default thinking mode for structured subtitle translation, as in TraDoc, so reasoning cannot consume the answer's output budget.
+- Account for cue IDs, JSON syntax and UTF-8 text in the completion budget, with a 2,048-token floor and an 8,192-token cap. Truncated generations retry with more output room.
+- Recover persistent structural failures in two smaller, independently validated batches, with one bounded attempt per half. Never checkpoint partial results or relax ID/formatting validation.
+- Distinguish output truncation, protected-formatting errors and malformed responses. Do not split authentication, transport, rate-limit failures or explicit refusals.
+
+No database migration or provider setting change is required. Existing validated checkpoints remain resumable after updating the container.
+
 ## 0.1.0 — 2026-10-26
 
 Initial public version for operator testing.

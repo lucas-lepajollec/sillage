@@ -70,7 +70,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.1.0` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.1.1` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 ## 5. Configuration and persistence
 
