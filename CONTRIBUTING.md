@@ -25,6 +25,10 @@ npm --prefix frontend run build
 
 Install Chromium once with `cd frontend` then `npx playwright install chromium`. Run `npm run test:e2e`; it launches disposable fixture services itself. Linux CI also installs browser OS dependencies. For the production container, run `docker build -t sillage:local .` and `uv run python tests/docker_smoke.py`. All these checks use generated/shareable fixtures and deterministic test-only providers; no API key or paid request is needed.
 
+## Release numbering
+
+Releases use `0.0.X`, increasing the final number only, starting at 0.0.4. Historical 0.1.x/0.2.x/0.3.x tags remain immutable. The newest release and Docker image are explicitly marked `latest`; the highest semantic version does not identify the newest publication during this numbering transition. Publish full version/SHA image tags alongside `latest`.
+
 ## Pull requests
 
 Use a topic branch and open a PR on GitHub. Describe the user-visible result, validation, compatibility and any data/timing risk. Add regression tests for fragile parsing, publication, provider or checkpoint changes. Update documentation with behavior. Keep private checkout notes in ignored .project-local/ and AGENTS.override.md.

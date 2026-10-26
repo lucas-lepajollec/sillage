@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Eye,
   FolderOpen,
@@ -58,6 +60,13 @@ export function Translations({
   const client = useQueryClient();
   const [filter, setFilter] = useState<JobFilter>("all");
   const [search, setSearch] = useState("");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const paginationStart = useRef<HTMLElement>(null);
+  const changeFilter = (next: JobFilter) => {
+    setFilter(next);
+    setPageIndex(0);
+  };
   const [detailId, setDetailId] = useState<string | null>(null);
   const [cancel, setCancel] = useState<Job | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -115,6 +124,65 @@ export function Translations({
       (filter === "all" ||
         (filter === "active" && activeStatuses.includes(job.status)) ||
         job.status === filter),
+  );
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
+  const currentPage = Math.min(pageIndex, pageCount - 1);
+  const pageJobs = visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  useEffect(() => {
+    setPageIndex((index) => Math.min(index, pageCount - 1));
+  }, [pageCount]);
+  const goToPage = (index: number) => {
+    setPageIndex(index);
+    paginationStart.current?.scrollIntoView({ block: "start" });
+    paginationStart.current?.focus({ preventScroll: true });
+  };
+  const pagination = (position: "top" | "bottom") => (
+    <nav
+      className="jobs-pagination"
+      aria-label={`Pagination des traductions ${position === "top" ? "en haut" : "en bas"}`}
+      ref={position === "top" ? paginationStart : undefined}
+      tabIndex={-1}
+    >
+      <span className="jobs-page-range" aria-live={position === "top" ? "polite" : undefined} aria-atomic="true">
+        {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, visible.length)} sur {visible.length} traductions
+      </span>
+      <div className="jobs-page-controls">
+        {position === "top" && (
+          <label className="jobs-page-size">
+            Par page
+            <select
+              aria-label="Traductions par page"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPageIndex(0);
+              }}
+            >
+              {[5, 10, 25].map((size) => <option key={size}>{size}</option>)}
+            </select>
+          </label>
+        )}
+        <span className="jobs-page-number">Page {currentPage + 1} / {pageCount}</span>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Page précédente"
+          disabled={currentPage === 0}
+          onClick={() => goToPage(currentPage - 1)}
+        >
+          <ChevronLeft size={16} />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Page suivante"
+          disabled={currentPage === pageCount - 1}
+          onClick={() => goToPage(currentPage + 1)}
+        >
+          <ChevronRight size={16} />
+        </Button>
+      </div>
+    </nav>
   );
   const download = async (job: Job) => {
     setDownloading(job.id);
@@ -210,7 +278,7 @@ export function Translations({
             {review.length > 0 && (
               <button
                 className="review-link"
-                onClick={() => setFilter("review")}
+                onClick={() => changeFilter("review")}
               >
                 <AlertTriangle size={14} />
                 {review.length} résultat{review.length > 1 ? "s" : ""} à
@@ -241,7 +309,7 @@ export function Translations({
                 <button
                   key={item.value}
                   className={filter === item.value ? "active" : ""}
-                  onClick={() => setFilter(item.value)}
+                  onClick={() => changeFilter(item.value)}
                   aria-pressed={filter === item.value}
                 >
                   {item.label}
@@ -256,7 +324,10 @@ export function Translations({
                   aria-label="Rechercher une traduction"
                   placeholder="Rechercher…"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPageIndex(0);
+                  }}
                 />
               </div>
               {failed.length > 0 && (
@@ -272,13 +343,14 @@ export function Translations({
               )}
             </div>
           </div>
+          {visible.length > 0 && pagination("top")}
           <div className="job-list">
             {visible.length === 0 && (
               <Empty icon={<Search size={26} />} title="Aucune traduction ici">
                 Changez de filtre pour retrouver les autres épisodes.
               </Empty>
             )}
-            {visible.map((job) => {
+            {pageJobs.map((job) => {
               const isActive = activeStatuses.includes(job.status);
               const jobStages = stages.filter(
                 (stage) => stage !== "syncing" || job.sync_mode !== "preserve",
@@ -441,6 +513,7 @@ export function Translations({
               );
             })}
           </div>
+          {pageCount > 1 && pagination("bottom")}
         </>
       )}
       <PreviewDrawer
