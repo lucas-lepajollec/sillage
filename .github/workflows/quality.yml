@@ -25,8 +25,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install media tools and locked dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update -qq
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y --no-install-recommends ffmpeg
           uv sync --frozen --extra dev --extra sync
           npm --prefix frontend ci
       - name: Backend and public documentation checks
