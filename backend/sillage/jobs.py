@@ -146,7 +146,7 @@ class Worker:
             raise ValueError("La piste source a changé depuis le checkpoint. Créez un nouveau traitement.")
         doc = SubtitleDocument.load(source)
         self.validate_duration(doc, info["duration"])
-        warnings = list(doc.warnings)
+        warnings = list(dict.fromkeys(doc.warnings + job.get("warnings", [])))
         self.store.patch(jid, source_hash=digest, source_file=str(source), total=len(doc.segments), warnings=warnings)
         translations = self.store.translations(jid)
         doc.validate_translations(translations, require_all=False)
@@ -199,7 +199,12 @@ class Worker:
                     except providers.StructuredOutputError as error:
                         limit = min(limit, error.batch_size)
                         record_usage(error.usage)
-                        self.store.patch(jid, adaptive_batch_size=limit)
+                        warnings.extend(w for w in error.warnings if w not in warnings)
+                        self.store.patch(jid, adaptive_batch_size=limit, warnings=warnings)
+                        raise
+                    except providers.ProviderError as error:
+                        warnings.extend(w for w in error.warnings if w not in warnings)
+                        self.store.patch(jid, warnings=warnings)
                         raise
                     candidate = translations | result["translations"]
                     doc.validate_translations(candidate, require_all=False)

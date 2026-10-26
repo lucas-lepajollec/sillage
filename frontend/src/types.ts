@@ -60,9 +60,15 @@ export type ProviderKind =
   | "deepseek"
   | "openrouter"
   | "ollama"
+  | "groq"
+  | "mistral"
+  | "xai"
+  | "lmstudio"
+  | "vllm"
+  | "llamacpp"
   | "custom";
 export type ModelCatalog = {
-  models: { id: string; name: string }[];
+  models: { id: string; name: string; reasoning?: "mandatory"; warning?: string }[];
   truncated: boolean;
 };
 export type Provider = {

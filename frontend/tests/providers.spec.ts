@@ -269,3 +269,31 @@ test("model search, empty results and the light form work in a short viewport", 
     }),
   ).toBeVisible();
 });
+
+test("new services and mandatory reasoning stay selectable with an explicit warning", async ({ page }) => {
+  await page.route("**/api/providers/models", (route) => route.fulfill({ json: {
+    models: [{ id: "required-local", name: "Modèle obligatoire", reasoning: "mandatory",
+      warning: "Ce modèle impose le raisonnement : la traduction reste active. Le délai et les tokens consommés peuvent augmenter." }],
+    truncated: false,
+  } }));
+  await page.goto("/#parametres");
+  await page.getByRole("button", { name: "Ajouter un fournisseur", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const services = dialog.getByRole("combobox", { name: "Fournisseur", exact: true });
+  for (const kind of ["groq", "mistral", "xai", "lmstudio", "vllm", "llamacpp"]) {
+    await services.selectOption(kind);
+    if (["lmstudio", "vllm", "llamacpp"].includes(kind)) {
+      await expect(dialog.getByLabel(/^Clé API/)).not.toHaveAttribute("required", "");
+      await expect(dialog.getByLabel(/^URL du serveur/)).toBeVisible();
+    } else {
+      await expect(dialog.getByLabel(/^Clé API/)).toHaveAttribute("required", "");
+    }
+  }
+  await services.selectOption("lmstudio");
+  await dialog.getByLabel(/^URL du serveur/).fill("http://127.0.0.1:1234/api/v1");
+  await dialog.getByRole("button", { name: "Charger les modèles", exact: true }).click();
+  await expect(dialog.getByRole("status").filter({ hasText: "impose le raisonnement" })).toBeVisible();
+  await expect(dialog.getByRole("combobox", { name: "Modèle", exact: true })).toHaveValue("required-local");
+  await dialog.getByRole("button", { name: "Enregistrer le profil", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "LM Studio · required-local", exact: true })).toBeVisible();
+});

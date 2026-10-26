@@ -91,10 +91,12 @@ test("real library → track preview → provider → selected episodes → expo
   await expect(
     page.getByRole("heading", { name: "Traductions", exact: true }),
   ).toBeVisible();
-  await expect(page.locator(".job-card.job-completed")).toHaveCount(2, {
+  await expect(page.locator(".job-card.job-review")).toHaveCount(2, {
     timeout: 30_000,
   });
   await expect(page.locator(".job-card")).toHaveCount(2);
+  await page.locator(".job-warnings summary").first().click();
+  await expect(page.locator(".job-warnings").first()).toContainText("désactivation du raisonnement ne peut pas être confirmée");
   await expect(page.getByText("Lots ≤ 4 répliques", { exact: false }).first()).toBeVisible();
   await page
     .locator(".job-card")

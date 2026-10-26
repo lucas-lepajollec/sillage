@@ -26,6 +26,8 @@ def invoke(handler, config=None):
     ("openai", "/v1/models"), ("deepseek", "/v1/models"), ("openrouter", "/api/v1/models"),
     ("anthropic", "/v1/models"), ("gemini", "/v1beta/models"),
     ("ollama", "/api/tags"), ("custom", "/v1/models"),
+    ("groq", "/openai/v1/models"), ("mistral", "/v1/models"), ("xai", "/v1/models"),
+    ("lmstudio", "/api/v1/models"), ("vllm", "/v1/models"), ("llamacpp", "/v1/models"),
 ])
 def test_provider_catalogues_use_get_and_native_auth(kind, path):
     def handler(request):
@@ -41,6 +43,8 @@ def test_provider_catalogues_use_get_and_native_auth(kind, path):
             assert request.headers["authorization"] == "Bearer TEST-ONLY-catalogue-key"
         if kind == "gemini":
             data = {"models": [{"name": "models/text-model", "displayName": "Text model", "supportedGenerationMethods": ["generateContent"]}]}
+        elif kind == "lmstudio":
+            data = {"models": [{"key": "text-model", "display_name": "Text model", "type": "llm"}]}
         elif kind == "ollama":
             data = {"models": [{"name": "local-model:latest"}]}
         else:
@@ -52,11 +56,11 @@ def test_provider_catalogues_use_get_and_native_auth(kind, path):
     assert "TEST-ONLY-catalogue-key" not in str(result)
 
 
-@pytest.mark.parametrize("kind", ["ollama", "custom"])
+@pytest.mark.parametrize("kind", ["ollama", "custom", "lmstudio", "vllm", "llamacpp"])
 def test_local_catalogues_work_without_an_api_key(kind):
     def handler(request):
         assert "authorization" not in request.headers
-        return httpx.Response(200, json={"models": []} if kind == "ollama" else {"data": []})
+        return httpx.Response(200, json={"models": []} if kind in {"ollama", "lmstudio"} else {"data": []})
     config = ProviderConfig(kind=kind, base_url="http://127.0.0.1:1234", model="unused")
     assert invoke(handler, config) == {"models": [], "truncated": False}
 
@@ -175,3 +179,25 @@ def test_catalogue_invalid_requests_never_echo_secrets(video, tmp_path):
                      {"kind": "deepseek", "api_key": secret, "unknown": secret}):
             response = client.post("/api/providers/models", json=body)
             assert response.status_code in {400, 422} and secret not in response.text
+
+
+@pytest.mark.parametrize('kind,item', [
+    ('openrouter', {'id': 'vendor/custom', 'reasoning': {'mandatory': True, 'supported_efforts': ['low']}}),
+    ('lmstudio', {'type': 'llm', 'key': 'custom', 'capabilities': {'reasoning': {'allowed_options': ['on']}}}),
+    ('groq', {'id': 'openai/gpt-oss-20b'}),
+    ('gemini', {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']}),
+])
+def test_mandatory_models_remain_selectable_with_safe_catalogue_warning(kind, item):
+    data = {'models' if kind in {'lmstudio', 'gemini'} else 'data': [item]}
+    result = invoke(lambda request: httpx.Response(200, json=data), settings(kind))
+    model = result['models'][0]
+    assert model['reasoning'] == 'mandatory' and 'impose le raisonnement' in model['warning']
+    assert 'TEST-ONLY-catalogue-key' not in str(result)
+
+
+def test_lmstudio_catalogue_excludes_embeddings_and_decision_models():
+    result = invoke(lambda request: httpx.Response(200, json={'models': [
+        {'type': 'embedding', 'key': 'embed'}, {'type': 'decision', 'key': 'decision'},
+        {'type': 'llm', 'key': 'text', 'display_name': 'Dialogue'},
+    ]}), settings('lmstudio'))
+    assert result['models'] == [{'id': 'text', 'name': 'Dialogue'}]

@@ -88,13 +88,14 @@ def main():
                 ids = {j["id"] for j in response.json()}
                 for _ in range(100):
                     jobs = [j for j in client.get("/api/jobs").json() if j["id"] in ids]
-                    if all(j["status"] == "completed" for j in jobs):
+                    if all(j["status"] in {"completed", "review"} for j in jobs):
                         break
                     if any(j["status"] == "error" for j in jobs):
                         raise AssertionError(jobs)
                     time.sleep(0.2)
                 assert all(j["progress"] == 100 and j["output"] for j in jobs), jobs
                 for job in jobs:
+                    assert job["status"] == "review" and any("raisonnement" in w for w in job["warnings"])
                     assert b"Bonjour" in client.get(f"/api/jobs/{job['id']}/download").content
                     preview = client.get(f"/api/jobs/{job['id']}/preview").json()
                     assert preview["cues"][0]["start"] == 500
