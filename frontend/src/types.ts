@@ -61,6 +61,10 @@ export type ProviderKind =
   | "openrouter"
   | "ollama"
   | "custom";
+export type ModelCatalog = {
+  models: { id: string; name: string }[];
+  truncated: boolean;
+};
 export type Provider = {
   id?: string;
   name: string;

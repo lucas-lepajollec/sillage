@@ -46,17 +46,20 @@ test("real library → track preview → provider → selected episodes → expo
     .getByRole("button", { name: "Configurer un provider", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Ajouter un provider", exact: true })
+    .getByRole("button", { name: "Ajouter un fournisseur", exact: true })
     .click();
   const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/^Nom du profil/).fill("Provider de test HTTP");
   await dialog
-    .getByLabel("Nom du profil", { exact: true })
-    .fill("Provider de test HTTP");
-  await dialog
-    .getByRole("combobox", { name: "Service", exact: true })
+    .getByRole("combobox", { name: "Fournisseur", exact: true })
     .selectOption("custom");
-  await dialog.getByLabel(/^URL de l’API/).fill("http://127.0.0.1:5777/v1");
-  await dialog.getByLabel(/^Identifiant du modèle/).fill("sillage-test-only");
+  await dialog.getByLabel(/^URL du serveur/).fill("http://127.0.0.1:5777/v1");
+  await dialog
+    .getByRole("button", { name: "Charger les modèles", exact: true })
+    .click();
+  await dialog
+    .getByRole("combobox", { name: "Modèle", exact: true })
+    .selectOption("sillage-test-only");
   await dialog
     .getByRole("button", { name: "Enregistrer le profil", exact: true })
     .click();

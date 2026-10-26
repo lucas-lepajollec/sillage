@@ -1,11 +1,15 @@
 # Translation providers
 
-Sillage calls the provider selected for a job. There is no production simulator and no bundled model catalogue: enter an exact model identifier available to your account or Ollama server. Configure the provider in the interface, save its key when needed, then use **Test connection**. This performs one small, real translation request and can incur the provider's usual charge. Sillage never searches the workstation for credentials.
+Sillage calls the provider selected for a job. In **Paramètres → Ajouter un fournisseur**, choose the service, enter its API key (or the server URL for a local connection), then select a model from its live catalogue. Leaving the key field loads the catalogue; **Charger les modèles** also loads or refreshes it. A single returned model is selected automatically. Search appears for larger catalogues. Profile names are optional; Sillage generates one from the service and model. You can keep several independent cloud/local profiles and choose one before translating.
+
+Languages default to English → French. Languages, glossary, API URL overrides and request limits remain in **Réglages avancés**. Existing profiles keep their saved configuration. Ollama uses its native API; **Serveur compatible OpenAI** supports local or remote servers exposing Chat Completions and, when available, `/models`. Local services can omit the API key.
+
+Catalogue discovery makes only model-list GET requests, never a generation request. It does not save an unfinished profile, discover workstation credentials or install local models. If the catalogue is empty/unavailable, use **Saisir un modèle manuellement**. Model IDs remain free-form; no bundled list limits the models you can configure. The catalogue does not prove your account's generation permissions or JSON/translation compatibility. After saving, **Tester la connexion** makes a small, real translation request and can incur the provider's usual charge.
 
 | Kind | Default API base URL | Protocol |
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1` | Chat Completions, JSON output |
-| Anthropic | `https://api.anthropic.com/v1` | Messages, text blocks |
+| Anthropic | `https://api.anthropic.com/v1` | Messages, text blocks, native API-key header |
 | Gemini | `https://generativelanguage.googleapis.com/v1beta` | `models/{model}:generateContent` |
 | DeepSeek | `https://api.deepseek.com/v1` | OpenAI compatible Chat Completions |
 | OpenRouter | `https://openrouter.ai/api/v1` | OpenAI compatible Chat Completions |
@@ -13,6 +17,10 @@ Sillage calls the provider selected for a job. There is no production simulator 
 | Custom | Required | OpenAI compatible `/chat/completions` |
 
 The base URL includes the API version prefix shown above. Do not put a key, URL username/password, query string or fragment in it. API keys travel in request headers. Custom and Ollama permit a blank key for servers without authentication. HTTP endpoints on the LAN are supported deliberately; HTTPS remains available for secured endpoints. Requests do not follow redirects and the default HTTP client ignores environment proxies, avoiding an unintended destination for subtitle text or credentials.
+
+Discovery uses `/models` for compatible services, native `/api/tags` for Ollama, and the documented models endpoints for Gemini/Anthropic. It follows their pagination on the same endpoint with at most five pages, 2,000 normalized IDs/names and 4 MB per response, under a 30-second overall timeout. Text-generation capabilities are filtered where the service reports them. Some compatible catalogues also include models unsuitable for translation; use the connection test. A partial list is marked explicitly and manual entry remains available.
+
+Saved keys are reused only on the server for the same provider kind and exact normalized endpoint. Changing that binding requires entering a key again; saving a changed binding without one clears its old key. Failed lookups expose fixed messages, not provider response bodies. Draft keys stay in form memory until it closes; they are not stored in browser storage or catalogue caches.
 
 For Ollama on another machine, use that machine's reachable LAN address, such as `http://192.0.2.7:11434` (documentation address; replace it). The Ollama service must listen on its LAN interface and the host firewall must permit access from Sillage. Inside a container, `localhost` identifies that container. Sillage does not install a model or reconfigure the Ollama host. See the [Ollama network configuration guide](https://docs.ollama.com/faq).
 

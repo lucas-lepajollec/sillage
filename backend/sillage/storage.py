@@ -75,8 +75,13 @@ class Store:
         secret = item.pop("api_key", None)
         item.pop("has_key", None)
         with self.connect() as db:
-            previous = db.execute("SELECT secret FROM providers WHERE id=?", (pid,)).fetchone()
-            encrypted = self.cipher.encrypt(secret.encode()).decode() if secret else previous[0] if previous else ""
+            previous = db.execute("SELECT data,secret FROM providers WHERE id=?", (pid,)).fetchone()
+            previous_secret = ""
+            if previous:
+                previous_data = json.loads(previous[0])
+                if all(previous_data.get(key) == item.get(key) for key in ("kind", "base_url")):
+                    previous_secret = previous[1]
+            encrypted = self.cipher.encrypt(secret.encode()).decode() if secret else previous_secret
             db.execute("INSERT OR REPLACE INTO providers VALUES(?,?,?)", (pid, json.dumps(item), encrypted))
         return self.provider(pid)
 

@@ -2456,6 +2456,33 @@ main {
   flex-direction: column;
   gap: 17px;
 }
+.model-discovery-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.model-discovery select {
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.model-manual-toggle {
+  align-self: flex-start;
+  color: var(--accent);
+  font-size: 11px;
+  min-height: 30px;
+  text-align: left;
+}
+.model-manual-toggle:hover {
+  text-decoration: underline;
+}
+.provider-defaults {
+  font-size: 11px;
+  color: var(--dim);
+  line-height: 1.7;
+  margin-top: -10px;
+}
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

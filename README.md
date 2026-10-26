@@ -25,7 +25,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 
 - Lazy folder navigation, breadcrumbs, recursive on-demand scans, filters, selection and per-episode source tracks.
 - Embedded and external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
-- OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Ollama and custom OpenAI-compatible endpoints, with freely entered model IDs and profile glossaries.
+- Guided setup for OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Ollama and compatible endpoints: live model discovery/search, manual fallback, multiple profiles and optional glossaries.
 - Strict cue IDs and protected formatting, neighboring context, bounded requests/retries and encrypted backend provider keys.
 - SQLite checkpoints, real processing stages, cancellation and resume without retranslating validated batches.
 - Atomic external exports such as `Episode 01.fr.ass`, without replacing existing output.
@@ -59,7 +59,7 @@ Point `MEDIA_PATH` to your actual host library in an optional `.env`, and set `P
 docker compose up -d
 ```
 
-Open **`http://<your-server-ip>:5775`**. Configure an AI provider in **Paramètres**, then browse `/media` in **Explorer**. The connection test makes a real model request and may incur the provider's normal charge.
+Open **`http://<your-server-ip>:5775`**. In **Paramètres**, choose a provider, enter its key or local server URL and select a model. Catalogue lookup does not generate text; the separate connection test makes a real model request and may incur the provider's normal charge. Then browse `/media` in **Explorer**.
 
 You can also clone this repository and use its identical [Compose file](docker-compose.yml):
 
@@ -70,7 +70,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.1.1` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.2.0` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 ## 5. Configuration and persistence
 

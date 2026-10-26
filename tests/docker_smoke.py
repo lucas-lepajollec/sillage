@@ -69,6 +69,9 @@ def main():
                 response.raise_for_status()
                 provider = response.json()
                 assert client.post(f"/api/providers/{provider['id']}/test").status_code == 200
+                catalogue = client.post("/api/providers/models", json={"id": provider["id"], "kind": "custom", "base_url": provider["base_url"]})
+                catalogue.raise_for_status()
+                assert catalogue.json() == {"models": [{"id": "deterministic", "name": "Deterministic test model"}], "truncated": False}
                 scan = client.post("/api/scan", json={"path": "/media", "recursive": True}).json()
                 assert len(scan["episodes"]) == 3, scan
                 selected = scan["episodes"][:2]
@@ -92,7 +95,7 @@ def main():
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:5775/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, all tools, non-root UID, real MKV ASS/SRT pipeline, no source mutation, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, no source mutation, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 

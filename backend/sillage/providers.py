@@ -1,4 +1,4 @@
-"""Small, explicit HTTP adapters. No credential discovery, logging, or model catalogue.
+"""Small HTTP translation adapters. No credential discovery, logging, or bundled catalogue.
 
 translate handles one worker-owned batch; workers own concurrency and checkpoints.
 An injected AsyncClient permits protocol tests without contacting real providers.
@@ -187,7 +187,7 @@ def _request(config: ProviderConfig, system: str, user: str, budget: int) -> tup
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
                 "generationConfig": generation}
     elif config.kind == "anthropic":
-        headers.update({"Authorization": f"Bearer {config.api_key}", "anthropic-version": "2023-06-01"})
+        headers.update({"x-api-key": config.api_key, "anthropic-version": "2023-06-01"})
         url = base if base.endswith("/messages") else base + "/messages"
         body = {"model": config.model, "system": system, "messages": [{"role": "user", "content": user}],
                 "stream": False, "max_tokens": budget}

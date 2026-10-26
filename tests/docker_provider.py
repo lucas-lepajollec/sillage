@@ -6,6 +6,17 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        if self.path != "/v1/models":
+            self.send_error(404)
+            return
+        raw = json.dumps({"data": [{"id": "deterministic", "name": "Deterministic test model"}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
     def do_POST(self):
         data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         segments = json.loads(data["messages"][-1]["content"])["segments"]
