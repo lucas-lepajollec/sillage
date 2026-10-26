@@ -278,8 +278,14 @@ class SubtitleDocument:
 
     def _append(self, text: str, span, time_spans, start: str, end: str, warning=None):
         start_ms, end_ms = _milliseconds(start, self.format), _milliseconds(end, self.format)
-        if not (0 <= start_ms <= end_ms and (start_ms < end_ms or (warning or "").startswith("Commentaire"))):
-            raise ValueError("Durée de sous-titre invalide : début négatif ou fin avant le début.")
+        if not 0 <= start_ms <= end_ms:
+            event_id = f"e{len(self._events) + 1:06}"
+            line = self.original.count("\n", 0, span[0]) + 1
+            raise ValueError(f"{event_id}, ligne {line} : durée de sous-titre invalide dans la piste source "
+                             f"(début {start.strip()}, fin {end.strip()}). "
+                             "Relancer le modèle ne corrigera pas ces timings ; choisissez une autre piste.")
+        if start_ms == end_ms and not (warning or "").startswith("Commentaire"):
+            warning = "Durée nulle : événement non affiché conservé sans traduction." + (" " + warning if warning else "")
         event = _Event(f"e{len(self._events) + 1:06}", start_ms, end_ms, text, span, time_spans, warning=warning)
         self._events.append(event)
 
@@ -407,7 +413,7 @@ class SubtitleDocument:
         for event in self._events:
             if event.start + offset_ms < 0 or event.end + offset_ms < event.start + offset_ms:
                 warnings.append(f"{event.id} : timing négatif ou durée invalide.")
-            if duration and event.end + offset_ms > duration * 1000:
+            if duration and event.start != event.end and event.end + offset_ms > duration * 1000:
                 warnings.append(f"{event.id} : fin après la durée vidéo.")
         return warnings
 

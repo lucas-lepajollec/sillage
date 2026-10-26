@@ -40,6 +40,16 @@ class ProviderError(ValueError):
     """Safe to display: never contains a provider body, URL, key, or source text."""
 
 
+class StructuredOutputError(ProviderError):
+    """Sanitized failure plus operational feedback; never source/response bodies."""
+
+    def __init__(self, message: str, batch_size: int, usage: dict[str, int], requests: int):
+        super().__init__(message)
+        self.batch_size = batch_size
+        self.usage = dict(usage)
+        self.requests = requests
+
+
 class _OutputLimitError(ValueError):
     """The generation reached its output limit, even if its JSON looks complete."""
 
@@ -263,7 +273,7 @@ def _content(data: dict, kind: str) -> str:
         if data.get("stop_reason") == "max_tokens":
             raise _OutputLimitError
         if data.get("stop_reason") != "end_turn":
-            raise ValueError("Incomplete or refused generation")
+            raise _InterruptedGenerationError("Incomplete or refused generation")
         return "".join(part["text"] for part in data["content"] if part.get("type") == "text")
     if kind == "gemini":
         candidate = data["candidates"][0]
@@ -272,21 +282,21 @@ def _content(data: dict, kind: str) -> str:
         if candidate.get("finishReason") == "MAX_TOKENS":
             raise _OutputLimitError
         if candidate.get("finishReason") != "STOP":
-            raise ValueError("Incomplete generation")
+            raise _InterruptedGenerationError("Incomplete generation")
         return "".join(part["text"] for part in candidate["content"]["parts"]
                        if "text" in part and not part.get("thought"))
     if kind == "ollama":
         if data.get("done_reason") == "length":
             raise _OutputLimitError
         if data.get("done") is not True or data.get("done_reason", "stop") != "stop":
-            raise ValueError("Incomplete generation")
+            raise _InterruptedGenerationError("Incomplete generation")
         return data["message"]["content"]
     choice = data["choices"][0]
     if choice.get("finish_reason") == "content_filter" or choice["message"].get("refusal"):
         raise ProviderError("Le fournisseur a refusé cette traduction. Vérifiez ses règles de contenu ; aucun résultat partiel n’a été accepté.")
     if choice.get("finish_reason") == "length":
         raise _OutputLimitError
-    if choice.get("finish_reason") in {"aborted", "insufficient_system_resource"}:
+    if choice.get("finish_reason") in {"aborted", "insufficient_system_resource", "tool_calls", "function_call"}:
         raise _InterruptedGenerationError
     if choice.get("finish_reason") != "stop":
         raise ValueError("Incomplete generation")
@@ -296,6 +306,10 @@ def _content(data: dict, kind: str) -> str:
 def _translations(content: str, segments: list[dict[str, str]]) -> dict[str, str]:
     if not isinstance(content, str):
         raise ValueError("Non-text generation")
+    content = content.strip().removeprefix("\ufeff").strip()
+    fence = re.fullmatch(r"```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```", content, re.IGNORECASE)
+    if fence:
+        content = fence[1]
     parsed = _json(content)
     if not isinstance(parsed, dict) or set(parsed) != {"translations"} or not isinstance(parsed["translations"], list):
         raise ValueError("Invalid translation schema")
@@ -320,6 +334,12 @@ def _translations(content: str, segments: list[dict[str, str]]) -> dict[str, str
         if (not any(ch in TOKEN_RE.sub("", expected[cue_id]) for ch in "{}\\<>")
                 and any(ch in TOKEN_RE.sub("", text) for ch in "{}\\<>")):
             raise _FormattingError("New raw formatting in a masked cue")
+        prefix = re.match(r"^(?:__SILLAGE_[0-9]{4}__)*", expected[cue_id])[0]
+        suffix = re.search(r"(?:__SILLAGE_[0-9]{4}__)*$", expected[cue_id])[0]
+        if not text.strip().startswith(prefix) or not text.strip().endswith(suffix):
+            raise _FormattingError("Boundary formatting moved")
+        if any(ch.isalpha() for ch in TOKEN_RE.sub("", expected[cue_id])) and not any(ch.isalpha() for ch in TOKEN_RE.sub("", text)):
+            raise ValueError("No visible translated text")
         result[cue_id] = text.strip()
     if set(result) != set(expected):
         raise ValueError("Missing source IDs")
@@ -349,39 +369,84 @@ def _language_warnings(config: ProviderConfig, segments: list[dict[str, str]], o
     return []
 
 
+def initial_batch_size(config: dict[str, Any] | ProviderConfig) -> int:
+    """Conservative starting ceilings, not a claim about model context capacity."""
+    settings = _config(config)
+    return min(settings.batch_size, 4 if settings.kind in {"ollama", "custom"} else 10)
+
+
+def batch_byte_limit(config: dict[str, Any] | ProviderConfig) -> int:
+    return 1600 if _config(config).kind in {"ollama", "custom"} else 4000
+
+
+def take_batch(segments: list[dict[str, str]], limit: int, byte_limit: int) -> list[dict[str, str]]:
+    """Never split a cue or its protected tokens, even for one oversized cue."""
+    batch: list[dict[str, str]] = []
+    size = 0
+    for item in segments[:limit]:
+        cost = len(json.dumps(item, ensure_ascii=False).encode("utf-8")) + 2
+        if batch and size + cost > byte_limit:
+            break
+        batch.append(item)
+        size += cost
+    return batch
+
+
 async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict[str, Any]],
                     context: list[dict[str, Any]] | None = None, glossary: str = "", *,
                     client: httpx.AsyncClient | None = None) -> dict[str, Any]:
-    """Translate one exact-ID batch; reject invalid results before any checkpoint write.
+    """Adapt structural failures down to single cues within one shared call budget.
 
-    Additional whole-batch attempts are bounded by retries (0..5). A persistently
-    invalid batch can be split once into two single-attempt halves when retries
-    are enabled. No partial batch reaches the worker. Usage includes all parseable
-    responses; it is not a billing total when failed requests omit usage.
+    No child result leaves this function until the complete original batch validates.
+    Network/auth/refusal/interruption failures never trigger splitting. Zero retries
+    disables recovery. All retries and descendants share at most 64 HTTP requests.
     """
     settings = _config(config)
     source = _segments(segments)
+    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     if not source:
-        return {"translations": {}, "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, "warnings": []}
+        return {"translations": {}, "usage": usage, "warnings": [], "requests": 0}
     surroundings = _context(context or [])
     terms = glossary or settings.glossary
     if not isinstance(terms, str) or len(terms) > 20_000:
         raise ProviderError("Le glossaire est trop volumineux.")
-    # Include cue IDs, JSON syntax and non-ASCII text, not just dialogue length.
-    expected_bytes = len(json.dumps({"translations": source}, ensure_ascii=False).encode("utf-8"))
-    budget = max(MIN_OUTPUT_TOKENS, min(MAX_OUTPUT_TOKENS, expected_bytes * 2 + 512))
     owned_client = client is None
     http = client or httpx.AsyncClient(trust_env=False, follow_redirects=False)
-    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète."
-    repair = False
-    recoverable = False
-    try:
+    requests = 0
+    call_limit = min(64, (settings.retries + 1) * (2 * len(source) - 1))
+    smallest = len(source)
+    recovered = False
+    learned = len(source)
+
+    def failure(message, batch):
+        return StructuredOutputError(
+            message + f" Répliques concernées : {batch[0]['id']} à {batch[-1]['id']}. "
+            "Les lots déjà validés sont conservés.", min(smallest, max(1, len(batch) // 2)), usage, requests)
+
+    async def perform(batch, adjacent):
+        nonlocal requests, smallest, recovered, learned
+        expected = len(json.dumps({"translations": batch}, ensure_ascii=False).encode("utf-8"))
+        budget = max(MIN_OUTPUT_TOKENS, min(MAX_OUTPUT_TOKENS, expected * 2 + 512))
+        repair = False
+        error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète."
         for attempt in range(settings.retries + 1):
-            recoverable = False
-            system, user = _prompts(settings, source, surroundings, terms, repair)
+            if requests >= call_limit:
+                raise failure("La limite de récupération automatique a été atteinte ; réduisez la taille maximale des lots.", batch)
+            requests += 1
+            smallest = min(smallest, len(batch))
+            # Bound scene context independently of batch size. Keep whole cues;
+            # explicit glossary data is not silently truncated.
+            bounded, size = [], 0
+            for cue in reversed(_context(adjacent)):
+                cost = len(json.dumps(cue, ensure_ascii=False).encode("utf-8"))
+                if size + cost <= batch_byte_limit(settings):
+                    bounded.insert(0, cue)
+                    size += cost
+            system, user = _prompts(settings, batch, bounded, terms, repair)
             url, headers, body = _request(settings, system, user, budget)
             delay = min(8.0, 0.5 * 2 ** attempt)
+            structural = False
+            truncated = False
             try:
                 async with http.stream("POST", url, headers=headers, json=body,
                                        timeout=settings.timeout, follow_redirects=False) as response:
@@ -408,9 +473,7 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                         reported = _usage(data, settings.kind)
                         for key in usage:
                             usage[key] += reported[key]
-                        output = _translations(_content(data, settings.kind), source)
-                        return {"translations": output, "usage": usage,
-                                "warnings": _language_warnings(settings, source, output)}
+                        return _translations(_content(data, settings.kind), batch)
             except ProviderError:
                 raise
             except httpx.TimeoutException:
@@ -419,37 +482,42 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                 error = "La connexion au fournisseur a échoué. Vérifiez son URL et l’accès réseau."
             except _OutputLimitError:
                 error = "La réponse du fournisseur a atteint sa limite de sortie avant la fin de la traduction. Aucun résultat partiel n’a été accepté."
-                budget = min(MAX_OUTPUT_TOKENS, budget * 2)
-                repair = recoverable = True
+                structural = truncated = True
             except _FormattingError:
                 error = "La traduction JSON est invalide ou incomplète : le fournisseur a modifié des balises protégées. Aucun résultat partiel n’a été accepté."
-                repair = recoverable = True
+                structural = True
             except _InterruptedGenerationError:
                 error = "Le fournisseur a interrompu la génération avant sa fin. Réessayez plus tard ; aucun résultat partiel n’a été accepté."
             except (ValueError, KeyError, TypeError, IndexError, AttributeError):
                 error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète : réponse vide, structure ou répliques non conformes. Aucun résultat partiel n’a été accepté."
-                repair = recoverable = True
+                structural = True
+            if structural:
+                repair = True
+                if truncated and attempt == 0 and budget < MAX_OUTPUT_TOKENS and settings.retries > 0:
+                    budget = min(MAX_OUTPUT_TOKENS, budget * 2)
+                elif settings.retries > 0 and len(batch) > 1:
+                    recovered = True
+                    midpoint = len(batch) // 2
+                    learned = min(learned, max(1, midpoint))
+                    output = {}
+                    for half in (batch[:midpoint], batch[midpoint:]):
+                        ids = {cue["id"] for cue in half}
+                        neighbors = [cue | ({"translated": output[cue["id"]]} if cue["id"] in output else {})
+                                     for cue in batch if cue["id"] not in ids]
+                        output.update(await perform(half, adjacent + neighbors))
+                    # Validate the parent too; no partial result can be checkpointed.
+                    return _translations(json.dumps({"translations": [{"id": key, "text": value}
+                                                                       for key, value in output.items()]}), batch)
+                elif attempt == settings.retries:
+                    raise failure(error, batch)
             if attempt < settings.retries:
                 await asyncio.sleep(delay)
-        if recoverable and settings.retries > 0 and len(source) > 1:
-            # TraDoc also recovers structure failures in smaller subgroups.
-            # One split only, with no nested retries: at most retries+3 calls.
-            midpoint = len(source) // 2
-            output: dict[str, str] = {}
-            warnings: list[str] = []
-            single_attempt = settings.model_copy(update={"retries": 0})
-            for batch in (source[:midpoint], source[midpoint:]):
-                batch_ids = {item["id"] for item in batch}
-                adjacent = [item | ({"translated": output[item["id"]]} if item["id"] in output else {})
-                            for item in source if item["id"] not in batch_ids]
-                result = await translate(single_attempt, batch, surroundings + adjacent, terms, client=http)
-                output.update(result["translations"])
-                for key in usage:
-                    usage[key] += result["usage"][key]
-                warnings.extend(w for w in result["warnings"] if w not in warnings)
-            warnings.extend(w for w in _language_warnings(settings, source, output) if w not in warnings)
-            return {"translations": output, "usage": usage, "warnings": warnings}
         raise ProviderError(error) from None
+
+    try:
+        output = await perform(source, surroundings)
+        return {"translations": output, "usage": usage, "warnings": _language_warnings(settings, source, output),
+                "requests": requests, "recovered": recovered, "batch_size": learned}
     finally:
         if owned_client:
             await http.aclose()

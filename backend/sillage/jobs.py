@@ -42,6 +42,7 @@ class Worker:
         self.stopping = False
         self.create_lock = asyncio.Lock()
         self.sync_lock = asyncio.Lock()
+        self.inflight: dict[str, list[asyncio.Task]] = {}
 
     async def start(self):
         for job in self.store.jobs():
@@ -151,33 +152,71 @@ class Worker:
         doc.validate_translations(translations, require_all=False)
         pending = [s for s in doc.segments if s["id"] not in translations]
         total = len(doc.segments)
-        batches = [pending[start:start+config["batch_size"]] for start in range(0, len(pending), config["batch_size"])]
+        # Reuse only empirical ceilings from this exact profile/configuration.
+        # Operational feedback stays in job metadata, never in provider secrets.
+        limit = providers.initial_batch_size(config)
+        history = [entry for entry in self.store.jobs()
+                   if entry["provider_id"] == job["provider_id"]
+                   and entry["config_fingerprint"] == job["config_fingerprint"]][:20]
+        for entry in history:
+            learned = entry.get("adaptive_batch_size")
+            if isinstance(learned, int) and 1 <= learned <= 100:
+                limit = min(limit, learned)
+        self.store.patch(jid, adaptive_batch_size=limit)
+        positions = {segment["id"]: index for index, segment in enumerate(doc.segments)}
+
         async def translate_batch(batch):
-            position = next(i for i, s in enumerate(doc.segments) if s["id"] == batch[0]["id"])
-            context = doc.segments[max(0, position-3):position] + doc.segments[position+len(batch):position+len(batch)+3]
+            first, last = positions[batch[0]["id"]], positions[batch[-1]["id"]]
+            context = doc.segments[max(0, first-3):first] + doc.segments[last+1:last+4]
+            context = [cue | ({"translated": translations[cue["id"]]} if cue["id"] in translations else {}) for cue in context]
             return await providers.translate(config, batch, context, config.get("glossary", ""))
-        # Bound in-flight requests. A single episode is processed at a time; the
-        # provider's explicit concurrency controls its batches, defaulting to one.
-        for group_start in range(0, len(batches), config["concurrency"]):
+
+        def record_usage(result):
+            usage = dict(self.store.job(jid).get("usage", {}))
+            for key, value in result.items():
+                if isinstance(value, (int, float)):
+                    usage[key] = usage.get(key, 0) + value
+            self.store.patch(jid, usage=usage)
+
+        # Build each wave after feedback from the preceding wave. A precomputed
+        # episode-wide batch list would ignore the model's recovered smaller size.
+        while pending:
             self.check_cancel(jid)
             self.store.patch(jid, status="translating", progress=5 + int(80 * len(translations) / max(total, 1)), done=len(translations))
-            tasks = [asyncio.create_task(translate_batch(batch)) for batch in batches[group_start:group_start+config["concurrency"]]]
+            group = []
+            for _ in range(config["concurrency"]):
+                if not pending:
+                    break
+                batch = providers.take_batch(pending, limit, providers.batch_byte_limit(config))
+                group.append(batch)
+                pending = pending[len(batch):]
+            tasks = [asyncio.create_task(translate_batch(batch)) for batch in group]
+            self.inflight[jid] = tasks
             try:
                 for completed in asyncio.as_completed(tasks):
-                    result = await completed
+                    try:
+                        result = await completed
+                    except providers.StructuredOutputError as error:
+                        limit = min(limit, error.batch_size)
+                        record_usage(error.usage)
+                        self.store.patch(jid, adaptive_batch_size=limit)
+                        raise
                     candidate = translations | result["translations"]
                     doc.validate_translations(candidate, require_all=False)
                     self.store.checkpoint(jid, result["translations"])
                     translations = candidate
+                    if result.get("recovered"):
+                        limit = min(limit, result["batch_size"])
                     warnings.extend(w for w in result.get("warnings", []) if w not in warnings)
-                    current_usage = self.store.job(jid).get("usage", {})
-                    usage = dict(current_usage)
-                    for k, value in result.get("usage", {}).items():
-                        if isinstance(value, (int, float)):
-                            usage[k] = usage.get(k, 0) + value
-                    self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(total,1)), usage=usage, warnings=warnings)
+                    record_usage(result.get("usage", {}))
+                    self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(total,1)),
+                                     adaptive_batch_size=limit, warnings=warnings)
                     self.check_cancel(jid)
+            except asyncio.CancelledError:
+                self.check_cancel(jid)  # User cancellation must not stop the queue loop.
+                raise
             finally:
+                self.inflight.pop(jid, None)
                 for task in tasks:
                     if not task.done():
                         task.cancel()
@@ -246,7 +285,11 @@ class Worker:
         job = self.store.job(jid)
         if job["status"] in {"completed", "review"} and not job.get("sync_pending"):
             raise ValueError("Ce traitement est déjà terminé.")
-        return self.store.patch(jid, cancel_requested=True, sync_pending=False, status="cancelled")
+        result = self.store.patch(jid, cancel_requested=True, sync_pending=False, status="cancelled")
+        # API handlers run in FastAPI's thread pool; cancel on the owning loop.
+        for task in self.inflight.get(jid, []):
+            task.get_loop().call_soon_threadsafe(task.cancel)
+        return result
 
     def resume(self, jid: str) -> dict:
         job = self.store.job(jid)
