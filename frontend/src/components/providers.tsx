@@ -238,7 +238,7 @@ export function Providers({
                       ? "Serveur local"
                       : "Sans clé"}
                 </span>
-                <span>{provider.batch_size} segments / lot</span>
+                <span>Lots adaptatifs · plafond {provider.batch_size}</span>
                 {provider.glossary && (
                   <span>
                     <BookOpen size={13} />
@@ -731,7 +731,7 @@ function ProviderForm({
             </label>
             <div className="form-grid three">
               <label className="form-field">
-                Taille des lots
+                Taille maximale des lots
                 <input
                   type="number"
                   required
@@ -740,7 +740,10 @@ function ProviderForm({
                   value={form.batch_size}
                   onChange={(e) => update("batch_size", Number(e.target.value))}
                 />
-                <small>Répliques par requête</small>
+                <small>
+                  Plafond : les lots démarrent plus petits et diminuent
+                  automatiquement si le modèle échoue.
+                </small>
               </label>
               <label className="form-field">
                 Concurrence

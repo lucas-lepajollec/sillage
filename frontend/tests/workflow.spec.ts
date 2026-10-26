@@ -95,6 +95,7 @@ test("real library → track preview → provider → selected episodes → expo
     timeout: 30_000,
   });
   await expect(page.locator(".job-card")).toHaveCount(2);
+  await expect(page.getByText("Lots ≤ 4 répliques", { exact: false }).first()).toBeVisible();
   await page
     .locator(".job-card")
     .first()

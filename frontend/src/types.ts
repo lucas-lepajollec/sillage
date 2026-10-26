@@ -112,6 +112,7 @@ export type Job = {
   sync_mode: SyncMode;
   offset_ms: number;
   timing_status: string;
+  adaptive_batch_size?: number;
   sync_pending?: boolean;
   sync_proposal?: {
     offset_ms: number;

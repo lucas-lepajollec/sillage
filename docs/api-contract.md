@@ -19,3 +19,5 @@ POST /api/jobs/{id}/sync/accept -> Job (only pending auto proposal; finalizes si
 POST /api/jobs/{id}/sync/reject -> Job (publish source timings)
 GET /api/jobs/{id}/download -> subtitle file (validated root).
 Optional X-Access-Key configured by ACCESS_KEY. Frontend stores in sessionStorage and attaches header; 401 shows login. GET /api/config -> {auth_required:boolean} public.
+
+Job responses may include `adaptive_batch_size` (current conservative per-request ceiling). `Provider.batch_size` is a maximum; observed recovery can reduce actual batches. Existing jobs/checkpoints need no migration.

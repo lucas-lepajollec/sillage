@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.2 — 2026-10-26
+
+- Start with conservative cloud/local batch ceilings and a UTF-8 byte limit. Reduce invalid batches progressively down to a single cue instead of requiring manual episode restarts; remember reduced ceilings for the same unchanged provider profile/configuration across waves, resumes and recent episodes.
+- Bound all retry/split descendants to 64 HTTP calls per initial batch; never split network/auth/refusal errors or accept incomplete parent batches. Permit a complete JSON code fence without accepting surrounding prose or relaxing IDs/formatting validation.
+- Preserve zero-duration ASS/SSA/SRT events without translating them, with a review warning. They were incorrectly rejected by the negative/reversed-duration diagnostic. Truly reversed source timings still fail before any model call, now with an event ID, line and timestamps.
+- Existing validated checkpoints/settings remain compatible; no database migration. Actual model quality and the private episode's exact source defect still require operator acceptance.
+
 ## 0.2.1 — 2026-10-26
 
 - Use port **2511** for the production container and its default host mapping, including the healthcheck.

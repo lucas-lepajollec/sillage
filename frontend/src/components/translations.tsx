@@ -370,6 +370,9 @@ export function Translations({
                       {job.total
                         ? `${job.done} / ${job.total} segments`
                         : "Segments en préparation"}
+                      {job.adaptive_batch_size && (
+                        <> · Lots ≤ {job.adaptive_batch_size} répliques</>
+                      )}
                       <span className="footer-dot">·</span>
                       {job.sync_mode === "preserve" ? (
                         <>

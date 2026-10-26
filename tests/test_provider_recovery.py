@@ -98,13 +98,13 @@ def test_invalid_batch_recovers_in_two_validated_halves_with_scene_context():
                        for cue in user["context"])
         return httpx.Response(200, json=envelope(text=output(translated(batch))))
     result = invoke(handler, settings=config(retries=1), segments=cues())
-    assert [len(request["segments"]) for request in requests] == [4, 4, 2, 2]
+    assert [len(request["segments"]) for request in requests] == [4, 2, 2]
     assert result["translations"] == {cue["id"]: cue["text"] for cue in translated(cues())}
-    assert result["usage"]["total_tokens"] == 60
-    assert {cue["id"] for cue in requests[2]["context"]} == {"cue-2", "cue-3"}
+    assert result["usage"]["total_tokens"] == 45
+    assert {cue["id"] for cue in requests[1]["context"]} == {"cue-2", "cue-3"}
 
 
-def test_failed_second_half_never_returns_partial_translations_or_splits_again():
+def test_failed_descendant_never_returns_partial_parent_translations():
     sizes = []
     def handler(request):
         _, user = request_batch(request)
@@ -114,7 +114,7 @@ def test_failed_second_half_never_returns_partial_translations_or_splits_again()
         return httpx.Response(200, json=envelope(text=output(items)))
     with pytest.raises(ProviderError, match="invalide ou incomplète"):
         invoke(handler, settings=config(retries=1), segments=cues())
-    assert sizes == [4, 4, 2, 2]
+    assert sizes == [4, 2, 2, 1, 1]
 
 
 def test_maximum_retry_setting_still_has_a_finite_recovery_budget():
@@ -125,7 +125,7 @@ def test_maximum_retry_setting_still_has_a_finite_recovery_budget():
         sizes.append(len(batch))
         return httpx.Response(200, json=envelope(text=output(translated(batch) if len(batch) == 2 else [])))
     result = invoke(handler, settings=config(retries=5), segments=cues())
-    assert sizes == [4] * 6 + [2, 2]
+    assert sizes == [4, 2, 2]
     assert len(result["translations"]) == 4
 
 
@@ -139,7 +139,7 @@ def test_cancellation_during_recovery_is_not_swallowed():
         return httpx.Response(200, json=envelope(text=output([])))
     with pytest.raises(asyncio.CancelledError):
         invoke(handler, settings=config(retries=1), segments=cues())
-    assert sizes == [4, 4, 2]
+    assert sizes == [4, 2, 1]
 
 
 @pytest.mark.parametrize("failure", ["auth", "rate-limit", "network", "refusal", "aborted", "invalid"])
@@ -175,3 +175,105 @@ def test_output_limit_has_a_specific_diagnostic_even_with_complete_json():
     data["choices"][0]["finish_reason"] = "length"
     with pytest.raises(ProviderError, match="limite de sortie"):
         invoke(lambda request: httpx.Response(200, json=data))
+
+
+@pytest.mark.parametrize('kind', ['openai', 'deepseek', 'anthropic', 'gemini', 'ollama', 'openrouter', 'custom'])
+def test_model_that_only_handles_single_cues_recovers_without_manual_restart(kind):
+    sizes = []
+    def handler(request):
+        body = json.loads(request.content)
+        content = (body['contents'][0]['parts'][0]['text'] if kind == 'gemini'
+                   else body['messages'][0]['content'] if kind == 'anthropic'
+                   else body['messages'][1]['content'])
+        batch = json.loads(content)['segments']
+        sizes.append(len(batch))
+        return httpx.Response(200, json=envelope(kind, output(translated(batch) if len(batch) == 1 else [])))
+    settings = config(kind, retries=1)
+    if kind == 'custom':
+        settings['base_url'] = 'http://127.0.0.1:19999/v1'
+    result = invoke(handler, settings=settings, segments=cues(8))
+    assert len(sizes) == 15 and sizes[:4] == [8, 4, 2, 1]
+    assert len(result['translations']) == 8
+    assert result['batch_size'] == 1 and result['recovered'] is True
+    assert result['requests'] == 15
+    assert result['usage']['total_tokens'] == 225
+
+
+def test_recovery_call_budget_is_shared_by_all_descendants():
+    from sillage.providers import StructuredOutputError
+    attempts = {}
+    calls = []
+    def handler(request):
+        _, user = request_batch(request)
+        batch = user['segments']
+        calls.append(len(batch))
+        key = batch[0]['id']
+        attempts[key] = attempts.get(key, 0) + (len(batch) == 1)
+        good = len(batch) == 1 and attempts[key] >= 6
+        return httpx.Response(200, json=envelope(text=output(translated(batch) if good else [])))
+    with pytest.raises(StructuredOutputError, match='limite de récupération') as error:
+        invoke(handler, settings=config(retries=5), segments=cues(32))
+    assert len(calls) == error.value.requests == 64
+    assert error.value.usage['total_tokens'] == 64 * 15
+    assert error.value.batch_size == 1
+
+
+@pytest.mark.parametrize('wrapper', ['```json\n{}\n```', '```\n{}\n```', '\ufeff {} '])
+def test_complete_json_fence_is_unwrapped_without_loosening_validation(wrapper):
+    result = invoke(lambda request: httpx.Response(200, json=envelope(text=wrapper.format(output()))))
+    assert result['translations'] == {'a': 'Bonjour.'}
+
+
+def test_prose_outside_json_is_still_rejected():
+    with pytest.raises(ProviderError, match='invalide ou incomplète'):
+        invoke(lambda request: httpx.Response(200, json=envelope(text='Here is the translation: ' + output())))
+
+
+def test_planner_bounds_utf8_bytes_and_context_without_splitting_a_cue():
+    from sillage.providers import take_batch, batch_byte_limit, initial_batch_size
+    assert initial_batch_size(config('ollama', batch_size=100)) == 4
+    assert initial_batch_size(config('deepseek', batch_size=100)) == 10
+    assert initial_batch_size(config(batch_size=2)) == 2
+    long = [{'id': str(i), 'text': '日本語' * 200} for i in range(10)]
+    assert len(take_batch(long, 10, 1600)) == 1
+    def handler(request):
+        _, user = request_batch(request)
+        assert len(json.dumps(user['context'], ensure_ascii=False).encode()) < batch_byte_limit(config()) + 100
+        return httpx.Response(200, json=envelope())
+    invoke(handler, context=long)
+
+
+@pytest.mark.parametrize('kind', ['anthropic', 'gemini', 'ollama'])
+def test_native_provider_interruption_never_splits(kind):
+    sizes = []
+    def handler(request):
+        body = json.loads(request.content)
+        content = (body['contents'][0]['parts'][0]['text'] if kind == 'gemini'
+                   else body['messages'][0]['content'] if kind == 'anthropic'
+                   else body['messages'][1]['content'])
+        sizes.append(len(json.loads(content)['segments']))
+        data = envelope(kind)
+        if kind == 'anthropic':
+            data['stop_reason'] = 'pause_turn'
+        elif kind == 'gemini':
+            data['candidates'][0]['finishReason'] = 'OTHER'
+        else:
+            data['done_reason'] = 'unload'
+        return httpx.Response(200, json=data)
+    with pytest.raises(ProviderError, match='interrompu'):
+        invoke(handler, settings=config(kind, retries=1), segments=cues())
+    assert sizes == [4, 4]
+
+
+def test_moved_boundary_tokens_are_recovered_before_worker_validation():
+    def handler(request):
+        _, user = request_batch(request)
+        batch = user['segments']
+        items = translated(batch)
+        if len(batch) > 1:
+            for item in items:
+                item['text'] = item['text'].replace('__SILLAGE_0000__', 'Bonjour __SILLAGE_0000__')
+        return httpx.Response(200, json=envelope(text=output(items)))
+    result = invoke(handler, settings=config(retries=1), segments=cues())
+    assert result['batch_size'] == 1 and len(result['translations']) == 4
+    assert all(text.startswith('__SILLAGE_0000__') for text in result['translations'].values())

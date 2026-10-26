@@ -239,3 +239,151 @@ async def test_simultaneous_requests_reserve_episode_once(video, tmp_path):
     results = await asyncio.gather(worker.create(request), worker.create(request), return_exceptions=True)
     assert sum(isinstance(result, ValueError) for result in results) == 1
     assert len(store.jobs()) == 1
+
+
+async def test_adaptive_feedback_changes_next_wave_and_survives_resume_and_next_episode(video, tmp_path):
+    import json
+    import shutil
+    import httpx
+    from sillage import providers
+    from test_providers import envelope, output
+    store, worker, request = environment(video, tmp_path, batch=20)
+    profile = store.provider(request['provider_id'])
+    store.save_provider(profile | {'retries': 1})
+    source = video.with_suffix('.en.srt')
+    text = ''.join(f'{i}\n00:00:00,{i*100:03} --> 00:00:00,{i*100+50:03}\nHello {i}\n\n' for i in range(1, 9))
+    source.write_text(text)
+    request['items'][0]['track_id'] = f'external:{source.name}'
+    job = (await worker.create(request))[0]
+    calls, fail = [], True
+    original_translate = providers.translate
+    def handler(http_request):
+        nonlocal fail
+        batch = json.loads(json.loads(http_request.content)['messages'][1]['content'])['segments']
+        calls.append([cue['id'] for cue in batch])
+        good = not fail or batch[0]['id'] <= 'e000004'
+        if len(batch) > 1 and batch[0]['id'] > 'e000004':
+            good = False
+        items = [{'id': cue['id'], 'text': cue['text'].replace('Hello', 'Bonjour')} for cue in batch] if good else []
+        return httpx.Response(200, json=envelope(text=output(items)))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async def adapter(config, batch, context, glossary):
+            return await original_translate(config, batch, context, glossary, client=client)
+        with patch('sillage.jobs.providers.translate', side_effect=adapter), pytest.raises(providers.StructuredOutputError):
+            await worker.process(job['id'])
+        assert len(store.translations(job['id'])) == 4  # Failed descendants never checkpointed.
+        assert store.job(job['id'])['adaptive_batch_size'] == 1
+        assert store.job(job['id'])['usage']['total_tokens'] == 75
+        store.patch(job['id'], status='error')
+        fail = False
+        calls.clear()
+        reopened = Worker(Store(store.folder), worker.library)
+        reopened.resume(job['id'])
+        with patch('sillage.jobs.providers.translate', side_effect=adapter):
+            await reopened.process(job['id'])
+        assert [len(batch) for batch in calls] == [1]*4
+        assert all(batch[0] > 'e000004' for batch in calls)
+        assert store.job(job['id'])['status'] == 'completed'
+        second = video.with_name('Another episode.mkv')
+        shutil.copyfile(video, second)
+        second_source = second.with_suffix('.en.srt')
+        second_source.write_text(text)
+        next_request = request | {'items': [{'path': str(second), 'track_id': f'external:{second_source.name}'}]}
+        next_job = (await reopened.create(next_request))[0]
+        calls.clear()
+        with patch('sillage.jobs.providers.translate', side_effect=adapter):
+            await reopened.process(next_job['id'])
+        assert [len(batch) for batch in calls] == [1]*8
+        # A different model must never inherit the previous model's measured ceiling.
+        store.save_provider(store.provider(request['provider_id']) | {'model': 'different-model'})
+        third = video.with_name('Third episode.mkv')
+        shutil.copyfile(video, third)
+        third_source = third.with_suffix('.en.srt')
+        third_source.write_text(text)
+        third_request = request | {'items': [{'path': str(third), 'track_id': f'external:{third_source.name}'}]}
+        third_job = (await reopened.create(third_request))[0]
+        calls.clear()
+        with patch('sillage.jobs.providers.translate', side_effect=adapter):
+            await reopened.process(third_job['id'])
+        assert len(calls[0]) == 4
+
+
+async def test_zero_duration_external_ass_no_longer_blocks_real_pipeline(media_factory, tmp_path):
+    from conftest import ASS
+    video = media_factory(ass=True)
+    source = video.with_suffix('.en.ass')
+    line = 'Dialogue: 0,0:00:10.00,0:00:10.00,Default,,0,0,0,,Invisible source marker\n'
+    source.write_text(ASS + line)
+    before = source.read_bytes()
+    store, worker, request = environment(video, tmp_path)
+    request['items'][0]['track_id'] = f'external:{source.name}'
+    job = (await worker.create(request))[0]
+    with patch('sillage.jobs.providers.translate', side_effect=deterministic):
+        await worker.process(job['id'])
+    result = store.job(job['id'])
+    assert result['status'] == 'review' and any('Durée nulle' in warning for warning in result['warnings'])
+    assert line in Path(result['output']).read_text()
+    assert source.read_bytes() == before
+    assert result['done'] == result['total'] == 2
+
+
+async def test_recovered_size_is_used_by_next_wave_without_restarting(video, tmp_path):
+    store, worker, request = environment(video, tmp_path, batch=20)
+    source = video.with_suffix('.en.srt')
+    source.write_text(''.join(f'{i}\n00:00:00,{i*100:03} --> 00:00:00,{i*100+50:03}\nHello {i}\n\n' for i in range(1, 9)))
+    request['items'][0]['track_id'] = f'external:{source.name}'
+    job = (await worker.create(request))[0]
+    sizes = []
+    async def recovered(*args):
+        sizes.append(len(args[1]))
+        return (await deterministic(*args)) | {'recovered': len(args[1]) > 1, 'batch_size': 1}
+    with patch('sillage.jobs.providers.translate', side_effect=recovered):
+        await worker.process(job['id'])
+    assert sizes == [4, 1, 1, 1, 1]
+    assert store.job(job['id'])['adaptive_batch_size'] == 1
+
+
+async def test_reversed_source_timings_are_reported_before_any_model_call(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    source = video.with_suffix('.en.srt')
+    source.write_text('1\n00:00:03,000 --> 00:00:02,000\nHello\n')
+    request['items'][0]['track_id'] = f'external:{source.name}'
+    job = (await worker.create(request))[0]
+    with patch('sillage.jobs.providers.translate') as provider, pytest.raises(ValueError, match='piste source'):
+        await worker.process(job['id'])
+    provider.assert_not_called()
+    assert not video.with_suffix('.fr.srt').exists()
+
+
+async def test_user_cancellation_stops_inflight_recovery_and_queue_continues(video, tmp_path):
+    import asyncio
+    import shutil
+    store, worker, request = environment(video, tmp_path)
+    other = video.with_name('Next queued episode.mkv')
+    shutil.copyfile(video, other)
+    track = worker.library.inspect(other)['tracks'][0]['id']
+    entered = asyncio.Event()
+    calls = 0
+    async def waiting(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            await asyncio.Event().wait()
+        return await deterministic(*args)
+    with patch('sillage.jobs.providers.translate', side_effect=waiting):
+        await worker.start()
+        try:
+            first = (await worker.create(request))[0]
+            second = (await worker.create(request | {'items': [{'path': str(other), 'track_id': track}]}))[0]
+            await asyncio.wait_for(entered.wait(), timeout=3)
+            await asyncio.to_thread(worker.cancel, first['id'])
+            for _ in range(300):
+                if store.job(second['id'])['status'] == 'completed':
+                    break
+                await asyncio.sleep(.01)
+            assert store.job(first['id'])['status'] == 'cancelled'
+            assert store.translations(first['id']) == {}
+            assert store.job(second['id'])['status'] == 'completed'
+        finally:
+            await worker.stop()

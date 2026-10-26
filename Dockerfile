@@ -14,7 +14,7 @@ COPY backend/ ./backend/
 RUN uv sync --frozen --extra sync --no-dev
 
 FROM python:3.12-slim-bookworm
-ARG VERSION=0.2.1
+ARG VERSION=0.2.2
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="Sillage" \
       org.opencontainers.image.description="A focused, self-hosted subtitle translation studio" \

@@ -145,7 +145,6 @@ def test_utf16_bom_detected_and_legacy_guess_disclosed(tmp_path):
     ("[Script Info]\nScriptType: v4.00+\n[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hi", "ass"),
     ("1\n00:00:03,000 --> 00:00:02,000\nHi\n", "srt"),
     ("1\n-00:00:01,000 --> 00:00:02,000\nHi\n", "srt"),
-    ("1\n00:00:01,000 --> 00:00:01,000\nHi\n", "srt"),
     ("1\n00:00:01,000 --> 00:00:02,000\n", "srt"),
     ("not a subtitle", "ass"),
     ("1\n00:00:01,000 --> 00:00:02,000\nHi\x00\n", "srt"),
@@ -187,3 +186,28 @@ def test_libass_drawing_argument_regressions(text, drawing):
     # Cases informed by Sublarr's independently renderer-checked regressions;
     # expectations are drawing-state only, not full fansub conformance.
     assert any(t.kind == "content" and t.drawing for t in lex(text)[0]) is drawing
+
+
+@pytest.mark.parametrize('format_', ['ass', 'ssa', 'srt'])
+def test_zero_duration_is_preserved_exactly_and_never_sent_to_translation(format_):
+    if format_ == 'srt':
+        text = '1\n00:00:01,000 --> 00:00:01,000\nInvisible\n\n2\n00:00:02,000 --> 00:00:03,000\nHello\n'
+    else:
+        field = 'Layer' if format_ == 'ass' else 'Marked'
+        text = ('[Events]\nFormat: '+field+', Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'
+                'Dialogue: 0,0:00:01.00,0:00:01.00,Default,,0,0,0,,Invisible\n'
+                'Dialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,Hello\n')
+    doc = SubtitleDocument(text, format_)
+    assert [cue['id'] for cue in doc.segments] == ['e000002']
+    assert any('Durée nulle' in warning for warning in doc.warnings)
+    assert doc.render({}) == text
+    rendered = doc.render({'e000002': 'Bonjour'})
+    assert rendered == text.replace('Hello', 'Bonjour')
+    assert doc.timing_warnings(6) == []
+    with pytest.raises(ValueError, match='protégé'):
+        doc.validate_translations({'e000001': 'Changed invisible text'})
+
+
+def test_reversed_source_timings_explain_why_model_retries_will_not_help():
+    with pytest.raises(ValueError, match=r'e000001, ligne 3.*piste source.*00:00:03,000.*00:00:02,000.*Relancer'):
+        SubtitleDocument('1\n00:00:03,000 --> 00:00:02,000\nHello\n', 'srt')
