@@ -22,6 +22,8 @@ class Handler(BaseHTTPRequestHandler):
         segments = json.loads(data["messages"][-1]["content"])["segments"]
         result = []
         for segment in segments:
+            if data.get("model") == "partial-test" and segment["id"] == "e000002":
+                continue
             text = segment["text"].replace("Hello", "Bonjour").replace("world", "monde").replace("Goodbye", "Au revoir").replace("Station", "Gare")
             result.append({"id": segment["id"], "text": text})
         raw = json.dumps({"choices": [{"message": {"content": json.dumps({"translations": result})}, "finish_reason": "stop"}]}).encode()

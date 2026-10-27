@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Search,
   ScanLine,
+  Settings2,
   ShieldCheck,
   X,
   Trash2,
@@ -32,7 +33,7 @@ import {
   timingLabel,
   trackLabel,
 } from "../lib";
-import type { Episode, Job, JobStatus, Reanalysis } from "../types";
+import type { Episode, Job, JobStatus, Provider, Reanalysis } from "../types";
 import { groupJobFolders, jobFolderLabel } from "../job-folders";
 import { parentFolder } from "../tracks";
 import { Button } from "./ui/button";
@@ -51,6 +52,7 @@ const stages: JobStatus[] = [
 ];
 export function Translations({
   jobs,
+  providers,
   loading,
   error,
   retry,
@@ -59,6 +61,7 @@ export function Translations({
   onReanalyzed,
 }: {
   jobs: Job[];
+  providers: Provider[];
   loading: boolean;
   error: unknown;
   retry: () => void;
@@ -77,6 +80,21 @@ export function Translations({
   });
   const [folder, setFolder] = useState<string | null>(null);
   const [remove, setRemove] = useState<Job[] | null>(null);
+  const [configure, setConfigure] = useState<Job[] | null>(null);
+  const [profileId, setProfileId] = useState("");
+  const [restart, setRestart] = useState(false);
+  const reconfigure = useMutation({
+    mutationFn: () => api<Job[]>("/jobs/reconfigure", { ids: configure?.map((job) => job.id), provider_id: profileId, restart }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["jobs"] });
+      setConfigure(null);
+      notify(restart ? "Traduction remise en file depuis le début." : "Reprise demandée avec les paramètres choisis. Les segments validés sont conservés.");
+    },
+  });
+  const openConfigure = (entries: Job[]) => {
+    reconfigure.reset(); setRestart(false); setConfigure(entries);
+    setProfileId(providers.find((provider) => provider.id === entries[0]?.provider_id)?.id || providers[0]?.id || "");
+  };
   useEffect(() => { localStorage.setItem("sillage.jobs-view", view); }, [view]);
   const paginationStart = useRef<HTMLElement>(null);
   const changeFilter = (next: JobFilter) => {
@@ -162,6 +180,7 @@ export function Translations({
   const showFolders = view === "folders" && folder === null;
   const totalItems = showFolders ? folders.length : visible.length;
   const inactive = visible.filter((job) => !activeStatuses.includes(job.status)).slice(0, 500);
+  const configurable = visible.filter((job) => ["queued", ...retryStatuses].includes(job.status) && !job.sync_pending).slice(0, 500);
   const scopedFailed = visible.filter((job) => job.status === "error");
   const pageCount = Math.max(1, Math.ceil(totalItems / pageSize));
   const currentPage = Math.min(pageIndex, pageCount - 1);
@@ -383,6 +402,10 @@ export function Translations({
                   }}
                 />
               </div>
+              {!showFolders && configurable.length > 0 && <Button variant="outline" size="sm"
+                onClick={() => openConfigure(configurable)} disabled={!providers.length}>
+                <Settings2 size={14} />Adapter les paramètres ({configurable.length})
+              </Button>}
               {!showFolders && scopedFailed.length > 0 && (
                 <Button
                   variant="outline"
@@ -462,6 +485,7 @@ export function Translations({
                     <Languages size={13} />
                     <span>Piste source : {job.source_track ? trackLabel(job.source_track) : `${job.track_id} · libellé non enregistré`}</span>
                   </div>
+                  {job.translation_profile && <div className="job-source-track"><Settings2 size={13} /><span>{job.translation_profile.model} · {job.translation_profile.source_language} → {job.translation_profile.target_language}</span></div>}
                   <div className="job-stages">
                     {jobStages.map((stage, i) => (
                       <span
@@ -548,6 +572,10 @@ export function Translations({
                           Annuler
                         </Button>
                       )}
+                      {["queued", ...retryStatuses].includes(job.status) && !job.sync_pending && (
+                        <Button variant="ghost" size="sm" aria-label={`Adapter les paramètres de ${job.name}`}
+                          disabled={!providers.length} onClick={() => openConfigure([job])}><Settings2 size={14} />Paramètres</Button>
+                      )}
                       {retryStatuses.includes(job.status) && (
                         <Button
                           variant="outline"
@@ -594,6 +622,28 @@ export function Translations({
         onClose={() => setDetailId(null)}
         notify={notify}
       />
+      <Modal open={!!configure} onOpenChange={(open) => { if (!open && !reconfigure.isPending) setConfigure(null); }}
+        title="Adapter les paramètres" description={`${configure?.length || 0} traitement(s) — même piste source, sans nouvelle analyse`}>
+        <p className="modal-body-copy">Les limites de lots, concurrence, délai et tentatives du profil s’appliquent automatiquement aux prochaines requêtes. Le modèle et les langues restent ceux du lancement. Cette action permet de choisir les paramètres actuels d’un profil pour la reprise.</p>
+        {configure?.[0]?.translation_profile && <p className="modal-body-copy">Modèle au lancement : {configure[0].translation_profile.model} · {configure[0].translation_profile.source_language} → {configure[0].translation_profile.target_language}</p>}
+        <label className="form-field">Profil pour la reprise
+          <select aria-label="Profil pour la reprise" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+            {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.model}</option>)}
+          </select>
+        </label>
+        <label className="checkbox-label"><input type="radio" name="restart" checked={!restart} onChange={() => setRestart(false)} />Conserver les segments validés</label>
+        <p className="modal-body-copy">Seules les répliques restantes seront traduites. Un changement de modèle ou de glossaire peut modifier le style ; vérifiez la cohérence. Pour les anciens traitements, les paramètres initiaux peuvent être inconnus. Si vous changez de langue, recommencez depuis le début.</p>
+        <label className="checkbox-label"><input type="radio" name="restart" checked={restart} onChange={() => setRestart(true)} />Recommencer la traduction</label>
+        {restart && <p className="modal-body-copy">Les segments validés de ces traitements seront effacés et retraduits, avec de nouveaux appels au fournisseur. Les fichiers média et exports restent conservés.</p>}
+        {configure && configure.length > 1 && <p className="modal-body-copy">Le choix s’applique aux traitements en attente ou arrêtés du dossier, de la recherche et des filtres affichés, sur toutes les pages (500 maximum). Annulez d’abord un traitement déjà en cours.</p>}
+        {reconfigure.isError && <ErrorNotice error={message(reconfigure.error)} />}
+        <div className="modal-footer">
+          <Button variant="outline" disabled={reconfigure.isPending} onClick={() => setConfigure(null)}>Fermer</Button>
+          <Button disabled={reconfigure.isPending || !profileId} onClick={() => reconfigure.mutate()}>
+            {reconfigure.isPending ? "Préparation…" : restart ? "Confirmer et recommencer" : "Confirmer et reprendre"}
+          </Button>
+        </div>
+      </Modal>
       <Modal open={!!remove} onOpenChange={(open) => { if (!open && !deletion.isPending) setRemove(null); }}
         title="Supprimer de l’historique ?" description={`${remove?.length || 0} entrée${(remove?.length || 0) > 1 ? "s" : ""} sélectionnée${(remove?.length || 0) > 1 ? "s" : ""}`}>
         <p className="modal-body-copy">Les entrées, leurs checkpoints et fichiers de travail seront supprimés. Les MKV, pistes source et sous-titres déjà exportés restent sur votre disque. Les traitements actifs sont exclus.</p>

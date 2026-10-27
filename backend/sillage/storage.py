@@ -1,17 +1,23 @@
 """Local SQLite state. Provider keys are encrypted with a separate mode-0600 key."""
 from __future__ import annotations
 import json
+import hashlib
 import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def provider_fingerprint(config: dict) -> str:
+    data = {k: v for k, v in config.items() if k not in {"api_key", "has_key", "id", "name"}}
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
 class Store:
@@ -75,15 +81,56 @@ class Store:
         secret = item.pop("api_key", None)
         item.pop("has_key", None)
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             previous = db.execute("SELECT data,secret FROM providers WHERE id=?", (pid,)).fetchone()
             previous_secret = ""
             if previous:
                 previous_data = json.loads(previous[0])
+                # Capture the known old configuration before an edit. Legacy jobs
+                # only have a hash; do not guess what their translation settings were.
+                previous_config = previous_data | {"id": pid, "api_key": self.cipher.decrypt(previous[1].encode()).decode() if previous[1] else ""}
+                previous_hash = provider_fingerprint(previous_config)
+                snapshot = self.seal_config(previous_config)
+                for jid, raw in db.execute("SELECT id,data FROM jobs").fetchall():
+                    job = json.loads(raw)
+                    if job.get("provider_id") == pid and not job.get("provider_snapshot") and job.get("config_fingerprint") == previous_hash:
+                        job["provider_snapshot"] = snapshot
+                        db.execute("UPDATE jobs SET data=? WHERE id=?", (json.dumps(job), jid))
                 if all(previous_data.get(key) == item.get(key) for key in ("kind", "base_url")):
                     previous_secret = previous[1]
             encrypted = self.cipher.encrypt(secret.encode()).decode() if secret else previous_secret
             db.execute("INSERT OR REPLACE INTO providers VALUES(?,?,?)", (pid, json.dumps(item), encrypted))
         return self.provider(pid)
+
+    def seal_config(self, config: dict) -> str:
+        # Snapshots include credentials, so encrypt the entire payload. They never
+        # enter public job responses and survive profile edits/deletion safely.
+        clean = {k: v for k, v in config.items() if k != "has_key"}
+        return self.cipher.encrypt(json.dumps(clean).encode()).decode()
+
+    def open_config(self, snapshot: str) -> dict:
+        try:
+            return json.loads(self.cipher.decrypt(snapshot.encode()))
+        except (InvalidToken, ValueError, TypeError, AttributeError):
+            raise ValueError("Configuration enregistrée illisible. Adaptez le traitement depuis Traductions.") from None
+
+    def reconfigure_jobs(self, changes: dict[str, dict], restart: bool):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            records = {jid: json.loads(raw) for jid, raw in db.execute("SELECT id,data FROM jobs").fetchall()}
+            paths = set()
+            for jid in changes:
+                job = records.get(jid)
+                if not job or job["status"] not in {"queued", "error", "interrupted", "cancelled"} or job.get("sync_pending"):
+                    raise ValueError("Adaptez uniquement des traitements en attente ou arrêtés.")
+                if job["path"] in paths or any(other["id"] not in changes and other["path"] == job["path"]
+                    and (other["status"] in {"queued", "extracting", "translating", "validating", "syncing", "writing"} or other.get("sync_pending")) for other in records.values()):
+                    raise ValueError("Un autre traitement est déjà actif pour cet épisode.")
+                paths.add(job["path"])
+            for jid, patch in changes.items():
+                if restart:
+                    db.execute("DELETE FROM checkpoints WHERE job=?", (jid,))
+                db.execute("UPDATE jobs SET data=? WHERE id=?", (json.dumps(records[jid] | patch), jid))
 
     def delete_provider(self, pid: str):
         if any(j["provider_id"] == pid and (j["status"] in {"queued", "extracting", "translating", "validating", "syncing", "writing"} or j.get("sync_pending")) for j in self.jobs()):

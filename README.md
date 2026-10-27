@@ -30,7 +30,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 - Folder-based translation history, free source reanalysis and confirmed cleanup of inactive entries/checkpoints while preserving media and exported subtitles.
 - Guided setup for OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Groq, Mistral, xAI, Ollama, LM Studio, vLLM, llama.cpp and compatible endpoints: live model discovery/search, manual fallback, multiple profiles and optional glossaries.
 - Strict cue IDs and protected formatting, neighboring context, bounded requests/retries and encrypted backend provider keys.
-- Adaptive batches start conservatively, shrink after invalid model output and reuse measured ceilings for the same profile/model.
+- Adaptive batches start conservatively, retry only invalid cues, reduce temporarily and grow again after successful waves without slowing every later episode.
 - SQLite checkpoints, real processing stages, cancellation and resume without retranslating validated batches.
 - Atomic external exports such as `Episode 01.fr.ass`, without replacing existing output.
 - Explicit manual offsets and conservative audio-only synchronization proposals requiring your acceptance.
@@ -74,7 +74,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.6` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.7` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 
@@ -90,7 +90,7 @@ Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` b
 | `ACCESS_KEY` | Optional shared access key, configured through a private Compose override. |
 | `ALLOWED_HOSTS` | Additional hostname allowlist for a local reverse proxy; private IPs and localhost work by default. |
 
-Providers, model IDs, source/target languages, glossary, batch size, concurrency, timeouts and retries are configured in the UI. One episode runs at a time, with one provider request at a time by default. See [provider setup](docs/providers.md).
+Providers, model IDs, source/target languages, glossary, batch size, concurrency, timeouts and retries are configured in the UI. One episode runs at a time, with one provider request at a time by default. See [provider setup](docs/providers.md). Existing jobs keep an encrypted snapshot of their model/languages; operational limit edits apply to the next wave without invalidating checkpoints. Use **Traductions → Paramètres** (one job) or **Adapter les paramètres** (current group) to explicitly switch settings and resume in place, keeping validated cues or restarting after confirmation.
 
 A full French track can be filtered out; forced/signs-only French metadata does not automatically count as a complete translation. Review unknown or incorrect language tags manually.
 

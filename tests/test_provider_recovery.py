@@ -104,7 +104,7 @@ def test_invalid_batch_recovers_in_two_validated_halves_with_scene_context():
     assert {cue["id"] for cue in requests[1]["context"]} == {"cue-2", "cue-3"}
 
 
-def test_failed_descendant_never_returns_partial_parent_translations():
+def test_failed_descendant_raises_without_losing_independently_valid_cues():
     sizes = []
     def handler(request):
         _, user = request_batch(request)
@@ -112,8 +112,9 @@ def test_failed_descendant_never_returns_partial_parent_translations():
         sizes.append(len(batch))
         items = translated(batch) if len(batch) == 2 and batch[0]["id"] == "cue-0" else []
         return httpx.Response(200, json=envelope(text=output(items)))
-    with pytest.raises(ProviderError, match="invalide ou incomplète"):
+    with pytest.raises(ProviderError, match="invalide ou incomplète") as error:
         invoke(handler, settings=config(retries=1), segments=cues())
+    assert set(error.value.translations) == {"cue-0", "cue-1"}
     assert sizes == [4, 2, 2, 1, 1]
 
 
@@ -125,7 +126,7 @@ def test_maximum_retry_setting_still_has_a_finite_recovery_budget():
         sizes.append(len(batch))
         return httpx.Response(200, json=envelope(text=output(translated(batch) if len(batch) == 2 else [])))
     result = invoke(handler, settings=config(retries=5), segments=cues())
-    assert sizes == [4, 2, 2]
+    assert sizes == [4, 4, 2, 2]
     assert len(result["translations"]) == 4
 
 
@@ -279,3 +280,84 @@ def test_moved_boundary_tokens_are_recovered_before_worker_validation():
     result = invoke(handler, settings=config(retries=1), segments=cues())
     assert result['batch_size'] == 1 and len(result['translations']) == 4
     assert all(text.startswith('__SILLAGE_0000__') for text in result['translations'].values())
+
+
+@pytest.mark.parametrize('shape', ['map', 'bare-map', 'bare-list'])
+def test_equivalent_explicit_id_json_shapes_do_not_require_paid_repairs(shape):
+    items = translated(cues())
+    mapping = {item['id']: item['text'] for item in items}
+    payload = {'translations': mapping} if shape == 'map' else mapping if shape == 'bare-map' else items
+    result = invoke(lambda request: httpx.Response(200, json=envelope(text=json.dumps(payload))), segments=cues())
+    assert result['translations'] == mapping
+    assert result['requests'] == 1
+
+
+def test_only_invalid_cue_is_retried_without_lowering_the_whole_batch_to_one():
+    calls = []
+    def handler(request):
+        _, user = request_batch(request)
+        batch = user['segments']
+        calls.append([cue['id'] for cue in batch])
+        items = translated(batch)
+        if len(calls) == 1:
+            items[2]['text'] = 'Bonjour sans les balises'
+        return httpx.Response(200, json=envelope(text=output(items)))
+    result = invoke(handler, settings=config(retries=1), segments=cues())
+    assert calls == [['cue-0', 'cue-1', 'cue-2', 'cue-3'], ['cue-2']]
+    assert result['batch_size'] == 4
+    assert result['translations'] == {item['id']: item['text'] for item in translated(cues())}
+
+
+def test_valid_descendants_remain_available_when_a_later_cue_exhausts_recovery():
+    from sillage.providers import StructuredOutputError
+    def handler(request):
+        _, user = request_batch(request)
+        batch = user['segments']
+        good = [cue for cue in batch if cue['id'] != 'cue-2']
+        return httpx.Response(200, json=envelope(text=output(translated(good))))
+    with pytest.raises(StructuredOutputError) as error:
+        invoke(handler, settings=config(retries=1), segments=cues())
+    assert set(error.value.translations) == {'cue-0', 'cue-1', 'cue-3'}
+    assert error.value.requests == 3
+
+
+def test_duplicate_id_is_never_checkpointed_but_unique_siblings_are_retried_once():
+    calls = []
+    def handler(request):
+        _, user = request_batch(request)
+        batch = user['segments']
+        calls.append([cue['id'] for cue in batch])
+        items = translated(batch)
+        if len(calls) == 1:
+            items.append(items[0] | {'text': 'Conflicting duplicate'})
+        return httpx.Response(200, json=envelope(text=output(items)))
+    result = invoke(handler, settings=config(retries=1), segments=cues())
+    assert calls == [['cue-0', 'cue-1', 'cue-2', 'cue-3'], ['cue-0']]
+    assert result['translations']['cue-0'] == translated(cues(1))[0]['text']
+
+
+def test_transient_json_error_repairs_same_size_before_splitting():
+    sizes = []
+    def handler(request):
+        _, user = request_batch(request)
+        batch = user['segments']
+        sizes.append(len(batch))
+        return httpx.Response(200, json=envelope(text='invalid JSON' if len(sizes) == 1 else output(translated(batch))))
+    result = invoke(handler, settings=config(retries=2), segments=cues())
+    assert sizes == [4, 4]
+    assert not result['recovered']
+
+
+def test_network_failure_after_valid_partial_response_carries_only_validated_cues():
+    calls = 0
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise httpx.ConnectError('TEST-ONLY-private-details', request=request)
+        return httpx.Response(200, json=envelope(text=output(translated(cues()[:3]))))
+    with pytest.raises(ProviderError, match='connexion') as error:
+        invoke(handler, settings=config(retries=1), segments=cues())
+    assert set(error.value.translations) == {'cue-0', 'cue-1', 'cue-2'}
+    assert calls == 3
+    assert 'TEST-ONLY-private-details' not in str(error.value)

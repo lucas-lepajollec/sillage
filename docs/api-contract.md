@@ -21,3 +21,9 @@ GET /api/jobs/{id}/download -> subtitle file (validated root).
 Optional X-Access-Key configured by ACCESS_KEY. Frontend stores in sessionStorage and attaches header; 401 shows login. GET /api/config -> {auth_required:boolean} public.
 
 Job responses may include `adaptive_batch_size` (current conservative per-request ceiling). `Provider.batch_size` is a maximum; observed recovery can reduce actual batches. Existing jobs/checkpoints need no migration.
+
+## Profile edits and in-place recovery (0.0.7)
+
+`POST /api/jobs/reconfigure` accepts `{ids: string[1..500], provider_id: string, restart?: boolean}` (default false). It validates the whole group, then queues existing stopped/queued entries with the selected profile snapshot. Keeping checkpoints across a known language change is rejected; restart explicitly clears checkpoints. Active/in-flight/sync-pending/completed entries, duplicate episode paths and existing target outputs reject the group atomically. The source track remains unchanged. This endpoint can recover already-edited legacy jobs without rediscovery.
+
+Jobs may expose `translation_profile: {name,kind,model,source_language,target_language}`; the encrypted `provider_snapshot`, source/config hashes and internal batch policy never appear in public job responses. Profile runtime limits apply at the next wave; semantic settings remain recorded until explicitly adopted. See [provider lifecycle](providers.md#editing-profiles-and-recovering-existing-jobs).

@@ -109,11 +109,43 @@ def main():
                 assert deletion.json() == {"deleted": [jobs[0]["id"]], "warnings": []}
                 assert len(client.get("/api/jobs").json()) == 1
                 docker("exec", name, "python", "-c", "from pathlib import Path; import sys; assert Path(sys.argv[1]).is_file()", jobs[0]["output"])
+                # Real partial JSON failure, profile edit and in-place adoption.
+                # Generated copy only: no operator media or provider is involved.
+                recovery_source = next(media.rglob("*.mkv"))
+                recovery_video = recovery_source.with_name("Recovery fixture.mkv")
+                shutil.copyfile(recovery_source, recovery_video)
+                original[recovery_video.name] = hashlib.sha256(recovery_video.read_bytes()).hexdigest()
+                broken = client.post("/api/providers", json=provider | {"id": None, "model": "partial-test", "retries": 0, "batch_size": 4}).json()
+                path = "/media/" + recovery_video.relative_to(media).as_posix()
+                job_response = client.post("/api/jobs", json={"provider_id": broken["id"], "items": [{"path": path, "track_id": selected[0]["tracks"][0]["id"]}]})
+                job_response.raise_for_status()
+                recovery_id = job_response.json()[0]["id"]
+                for _ in range(100):
+                    recovery_job = next(j for j in client.get("/api/jobs").json() if j["id"] == recovery_id)
+                    if recovery_job["status"] == "error":
+                        break
+                    time.sleep(0.2)
+                assert recovery_job["status"] == "error" and recovery_job["done"] > 0, recovery_job
+                assert recovery_job["done"] < recovery_job["total"]
+                edited = client.post("/api/providers", json=broken | {"model": "deterministic", "concurrency": 2, "timeout": 180})
+                edited.raise_for_status()
+                assert next(j for j in client.get("/api/jobs").json() if j["id"] == recovery_id)["translation_profile"]["model"] == "partial-test"
+                adopted = client.post("/api/jobs/reconfigure", json={"ids": [recovery_id], "provider_id": broken["id"]})
+                adopted.raise_for_status()
+                assert "provider_snapshot" not in adopted.text
+                for _ in range(100):
+                    recovered_job = next(j for j in client.get("/api/jobs").json() if j["id"] == recovery_id)
+                    if recovered_job["status"] in {"completed", "review", "error"}:
+                        break
+                    time.sleep(0.2)
+                assert recovered_job["status"] == "review" and recovered_job["done"] == recovered_job["total"], recovered_job
+                assert recovered_job["translation_profile"]["model"] == "deterministic"
+                assert b"Bonjour" in client.get(f"/api/jobs/{recovery_id}/download").content
                 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*.mkv")} == original
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, source hashes, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, partial JSON checkpoints and in-place profile recovery, source hashes, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 

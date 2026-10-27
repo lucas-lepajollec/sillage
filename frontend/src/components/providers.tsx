@@ -754,7 +754,7 @@ function ProviderForm({
                 />
                 <small>
                   Plafond : les lots démarrent plus petits et diminuent
-                  automatiquement si le modèle échoue.
+                  temporairement si le modèle échoue, puis remontent après plusieurs réussites.
                 </small>
               </label>
               <label className="form-field">
@@ -769,7 +769,7 @@ function ProviderForm({
                     update("concurrency", Number(e.target.value))
                   }
                 />
-                <small>Une requête à la fois par défaut</small>
+                <small>1 à 8 lots simultanés. Ces limites s’appliquent aux prochaines requêtes des traitements existants, sans perdre leur progression.</small>
               </label>
               <label className="form-field">
                 Température

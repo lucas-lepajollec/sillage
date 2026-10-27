@@ -52,6 +52,11 @@ class DeleteJobsRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=500)
 
 
+class ReconfigureJobsRequest(DeleteJobsRequest):
+    provider_id: str = Field(max_length=128)
+    restart: bool = False
+
+
 class ModelListRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     id: str | None = Field(default=None, max_length=128)
@@ -154,7 +159,7 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
         return store.providers()
 
     @app.post("/api/providers")
-    def save_provider(data: ProviderConfig):
+    async def save_provider(data: ProviderConfig):
         return store.save_provider(data.model_dump())
 
     @app.post("/api/providers/models")
@@ -192,6 +197,10 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
     async def delete_jobs(data: DeleteJobsRequest):
         return await worker.delete(data.ids)
 
+    @app.post("/api/jobs/reconfigure")
+    async def reconfigure_jobs(data: ReconfigureJobsRequest):
+        return [public_job(j) for j in worker.reconfigure(data.ids, data.provider_id, data.restart)]
+
     @app.post("/api/jobs/{jid}/reanalyze")
     async def reanalyze_job(jid: str):
         # Inspection only. Keep the existing job/checkpoints and never contact
@@ -200,11 +209,11 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
         return await asyncio.to_thread(library.inspect, job["path"])
 
     @app.post("/api/jobs/{jid}/cancel")
-    def cancel_job(jid: str):
+    async def cancel_job(jid: str):
         return public_job(worker.cancel(jid))
 
     @app.post("/api/jobs/{jid}/resume")
-    def resume_job(jid: str):
+    async def resume_job(jid: str):
         return public_job(worker.resume(jid))
 
     @app.get("/api/jobs/{jid}/preview")
@@ -244,5 +253,5 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
 
 
 def public_job(job: dict) -> dict:
-    hidden = {"source_file", "source_hash", "config_fingerprint", "write_hash", "cancel_requested"}
+    hidden = {"source_file", "source_hash", "config_fingerprint", "write_hash", "cancel_requested", "provider_snapshot", "batch_policy"}
     return {k: v for k,v in job.items() if k not in hidden}
