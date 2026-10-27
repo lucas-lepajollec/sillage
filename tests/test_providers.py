@@ -40,7 +40,7 @@ def envelope(kind="openai", text=None):
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
 
 
-def invoke(handler, *, settings=None, segments=None, context=None, glossary=""):
+def invoke(handler, *, settings=None, segments=None, context=None, glossary="", **options):
     def transport(request):
         if request.url.path.endswith("/api/show"):
             return httpx.Response(200, json={"thinking": {"values": [False, True]}})
@@ -54,7 +54,7 @@ def invoke(handler, *, settings=None, segments=None, context=None, glossary=""):
     async def perform():
         async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
             return await translate(settings or config(), segments or [{"id": "a", "text": "Hello."}],
-                                   context or [], glossary, client=client)
+                                   context or [], glossary, client=client, **options)
     return run(perform())
 
 
@@ -269,8 +269,8 @@ def test_connection_executes_one_tiny_structured_model_call():
     def handler(request):
         attempts.append(request)
         user = json.loads(json.loads(request.content)["messages"][1]["content"])
-        assert user["segments"] == [{"id": "connection-check", "text": ["Hello.", "Goodbye."]}]
-        return httpx.Response(200, json=envelope(text=output([{"id": "connection-check", "text": ["Bonjour.", "Au revoir."]}])) )
+        assert user["segments"] == [{"id": "connection-check.s0000", "text": "Hello."}, {"id": "connection-check.s0001", "text": "Goodbye."}]
+        return httpx.Response(200, json=envelope(text=output([{"id": "connection-check.s0000", "text": "Bonjour."}, {"id": "connection-check.s0001", "text": "Au revoir."}])) )
     async def perform():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await test_connection(config(retries=5), client=client)

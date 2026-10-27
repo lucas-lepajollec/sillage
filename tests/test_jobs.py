@@ -45,29 +45,35 @@ async def test_formatted_episode_uses_visible_slots_preserves_old_progress_and_r
     def handler(req):
         cues = payload(req)['segments']
         calls.append([cue['id'] for cue in cues])
-        assert all(isinstance(cue['text'], list) for cue in cues)
+        assert all(isinstance(cue['text'], str if '.s' in cue['id'] else list) for cue in cues)
         assert '__SILLAGE_' not in json.dumps(cues)
         items = [cue | {'text': translated(cue['text'])} for cue in cues]
         for item in items:
             if broken and item['id'] == 'e000003':
                 item['text'] = ['fragment manquant']
+            if broken and item['id'] == 'e000003.s0002':
+                item['text'] = ''
         return httpx.Response(200, json=envelope(text=output(items)))
     original = providers.translate
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        async def adapter(config, *args):
-            return await original(config, *args, client=client)
+        async def adapter(config, *args, **kwargs):
+            return await original(config, *args, client=client, **kwargs)
         with patch('sillage.jobs.providers.translate', side_effect=adapter):
-            with pytest.raises(providers.StructuredOutputError, match='nombre de fragments'):
+            with pytest.raises(providers.StructuredOutputError, match='manquants ou invalides'):
                 await worker.process(job['id'])
             checkpointed = store.translations(job['id'])
             assert len(checkpointed) == 8 and checkpointed.items() >= old.items()
-            assert store.job(job['id'])['diagnostics'] == {'slot_count': 3}
+            assert store.job(job['id'])['diagnostics'] == {'slot_count': 1, 'fragment_fallback': 1, 'invalid_text': 3}
+            assert len(store.fragments(job['id'])) == 2
+            assert store.job(job['id'])['translation_failures']['e000003.s0002'] == 'Empty translated text'
             assert not video.with_suffix('.fr.ass').exists()
             broken = False
             calls.clear()
             store.patch(job['id'], status='error')
-            worker.resume(job['id'])
-            await worker.process(job['id'])
+            reopened = Worker(Store(store.folder), worker.library)
+            reopened.resume(job['id'])
+            await reopened.process(job['id'])
+            assert [cue for call in calls for cue in call if cue.startswith('e000003')] == ['e000003.s0002']
     assert not set(checkpointed).intersection(cue_id for call in calls for cue_id in call)
     final = store.job(job['id'])
     assert final['status'] == 'review' and final['done'] == final['total'] == 32  # Unknown reasoning control warning remains.
@@ -753,7 +759,7 @@ async def test_reconfigure_group_is_atomic_and_refuses_actual_active_or_exported
     assert store.job(job['id']) == before
 
 
-@pytest.mark.parametrize('policy', [2, 3])
+@pytest.mark.parametrize('policy', [2, 3, 4])
 async def test_valid_single_cues_grow_back_and_do_not_poison_the_next_episode(video, tmp_path, policy):
     import shutil
     store, worker, request = environment(video, tmp_path, batch=20)
@@ -768,7 +774,7 @@ async def test_valid_single_cues_grow_back_and_do_not_poison_the_next_episode(vi
         return await deterministic(config, batch, *args)
     with patch('sillage.jobs.providers.translate', side_effect=adapter):
         await worker.process(job['id'])
-    assert sizes[:3] == ([1, 1, 1] if policy == 3 else [4, 4, 4])
+    assert sizes[:3] == ([1, 1, 1] if policy == 4 else [4, 4, 4])
     assert max(sizes) > 4
     assert len(store.translations(job['id'])) == 32
     second = video.with_name('next.mkv')

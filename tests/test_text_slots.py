@@ -80,8 +80,8 @@ def test_partial_array_failure_retries_only_bad_cue_with_specific_instruction():
     source = [{'id': name, 'text': 'Hello __SILLAGE_0000__world!'} for name in ['a', 'b', 'c']]
     result = invoke(handler, settings=config(retries=1), segments=source)
     assert result['translations'] == {name: 'Bonjour __SILLAGE_0000__monde!' for name in ['a', 'b', 'c']}
-    assert [len(json.loads(call['messages'][1]['content'])['segments']) for call in calls] == [3, 1]
-    assert result['batch_size'] == 3 and result['diagnostics'] == {'slot_count': 1}
+    assert [len(json.loads(call['messages'][1]['content'])['segments']) for call in calls] == [3, 2]
+    assert result['batch_size'] == 3 and result['diagnostics'] == {'slot_count': 1, 'fragment_fallback': 1}
 
 
 def test_srt_line_endings_entities_and_literal_punctuation_are_restored_exactly():
@@ -114,7 +114,7 @@ def test_malformed_json_has_safe_diagnostic_and_specific_repair():
     assert result['translations'] == {'a': 'Bonjour.'}
 
 
-def test_connection_refuses_a_model_that_flattens_visible_spans_without_paid_repairs():
+def test_connection_refuses_a_model_that_merges_explicit_fragments_without_paid_repairs():
     import asyncio
     from sillage.providers import test_connection
     calls = []
