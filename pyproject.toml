@@ -7,7 +7,7 @@ license = "GPL-3.0-only"
 dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "pysubs2>=1.8,<2", "cryptography>=44", "charset-normalizer>=3.4,<4"]
 
 [project.optional-dependencies]
-sync = ["ffsubsync>=0.4.29,<0.5"]
+sync = ["ffsubsync>=0.5.1,<0.6"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
 
 [build-system]
