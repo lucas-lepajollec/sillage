@@ -16,7 +16,7 @@ Inspected 2026-10-26: [`gnehs/subtitle-translator-electron`](https://github.com/
 
 ## Sillage decisions
 
-Sillage adopts strict cue mapping, bounded batches, surrounding text context, an explicit glossary, bounded retries and durable completion checkpoints. Stable IDs are included in every response so validation can reject unknown, duplicate and missing cues even when an array's count happens to match. Protected formatting tokens are validated before saving a completed batch; subtitle rendering restores the original structure and timings. The model receives text only.
+Sillage adopts strict cue mapping, bounded batches, surrounding text context, an explicit glossary, bounded retries and durable completion checkpoints. Stable IDs are included in every response so validation can reject unknown, duplicate and missing cues even when an array's count happens to match. Protected formatting tokens are validated before saving a completed batch; subtitle rendering restores the original structure and timings. The model receives text only. Since0.0.9, formatted cues use ordered visible-text arrays on the wire; canonical markers stay local and are restored only after exact span validation. Existing marker-bearing checkpoints remain compatible. Missing internal boundaries are never inferred.
 
 Sillage's persistence and output ownership live in the worker and subtitle engine, while the provider layer accepts one pending batch. This makes checkpoint behavior testable without an API and prevents HTTP adapters from touching media files. A completed batch is the checkpoint unit. Provider configuration changes must not silently mix target languages in a resumed job; the worker owns the stored job identity.
 

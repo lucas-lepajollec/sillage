@@ -39,9 +39,13 @@ class TestProvider(BaseHTTPRequestHandler):
         request = json.loads(payload["messages"][-1]["content"])
         results = []
         for segment in request["segments"]:
-            text = segment["text"]
-            for source, target in {"Hello": "Bonjour", "world": "monde", "Goodbye": "Au revoir", "Station": "Gare"}.items():
-                text = text.replace(source, target)
+            spans = segment['text'] if isinstance(segment['text'], list) else [segment['text']]
+            translated = []
+            for text in spans:
+                for source, target in {"Hello": "Bonjour", "world": "monde", "Goodbye": "Au revoir", "Station": "Gare"}.items():
+                    text = text.replace(source, target)
+                translated.append(text)
+            text = translated if isinstance(segment['text'], list) else translated[0]
             results.append({"id": segment["id"], "text": text})
         body = {"choices": [{"message": {"content": json.dumps({"translations": results}, ensure_ascii=False)}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}}

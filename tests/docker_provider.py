@@ -22,11 +22,13 @@ class Handler(BaseHTTPRequestHandler):
         segments = json.loads(data["messages"][-1]["content"])["segments"]
         result = []
         for segment in segments:
-            if segment['text'].count('__SILLAGE_') >= 8:
+            spans = segment['text'] if isinstance(segment['text'], list) else [segment['text']]
+            if any('__SILLAGE_' in span for span in spans):
                 raise AssertionError('Glyph-level effects must never reach the test provider')
             if data.get("model") == "partial-test" and segment["id"] == "e000002":
                 continue
-            text = segment["text"].replace("Hello", "Bonjour").replace("world", "monde").replace("Goodbye", "Au revoir").replace("Station", "Gare")
+            translated = [span.replace("Hello", "Bonjour").replace("world", "monde").replace("Goodbye", "Au revoir").replace("Station", "Gare") for span in spans]
+            text = translated if isinstance(segment['text'], list) else translated[0]
             result.append({"id": segment["id"], "text": text})
         raw = json.dumps({"choices": [{"message": {"content": json.dumps({"translations": result})}, "finish_reason": "stop"}]}).encode()
         self.send_response(200)
