@@ -27,6 +27,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 - Embedded and external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
 - Reasoning disabled when supported; required reasoning stays usable with explicit time/token warnings.
 - Paginated translation history with search/status filters and readable mobile form fields.
+- Folder-based translation history, free source reanalysis and confirmed cleanup of inactive entries/checkpoints while preserving media and exported subtitles.
 - Guided setup for OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Groq, Mistral, xAI, Ollama, LM Studio, vLLM, llama.cpp and compatible endpoints: live model discovery/search, manual fallback, multiple profiles and optional glossaries.
 - Strict cue IDs and protected formatting, neighboring context, bounded requests/retries and encrypted backend provider keys.
 - Adaptive batches start conservatively, shrink after invalid model output and reuse measured ceilings for the same profile/model.
@@ -73,7 +74,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.5` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.6` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 
@@ -100,6 +101,14 @@ After scanning, use **Piste source** or **Vérifier la piste** for each episode.
 Use **Choisir les pistes** to apply equivalent tracks to selected episodes, an exact folder (excluding its subfolders) or all scanned episodes. The review list shows the exact scope, matches and skipped files before applying. Equivalence uses language, normalized title, format, embedded/external kind and forced/SDH indicators, never the stream number. External filenames vary by episode and are not compared. Missing or ambiguous matches keep their current choice. Search and filters do not narrow the explicitly chosen scope. You can return to the automatic choice for the same scope or for one episode. Choices last until a new scan.
 
 New jobs record their source-track metadata and show it in the translation list and preview. Older jobs retain their original track ID; their preview can read its current MKV label, explicitly marked as current metadata rather than a historical snapshot. **Reprendre** uses the original track and checkpoints. To change tracks, create a new translation from the explorer. Applying choices does not modify existing jobs.
+
+### Browse and manage translation history
+
+**Traductions** opens in **Dossiers** view, grouped by the exact source folder. Cards show the parent/folder name, full path, entry count, active jobs and errors. Open a folder to see its paginated jobs; **Tous les dossiers** returns to the overview. Search and status filters apply before grouping. A **Liste** alternative is remembered locally, and both folders and jobs use the 5/10/25 pagination controls. Queue totals remain global.
+
+**Réanalyser** rereads one job's MKV without a provider call, then prepares that episode in the explorer and opens its source preview. The previous track is selected when still available; otherwise Sillage warns and proposes its usual automatic choice. The old job/checkpoints stay intact. Only pressing **Traduire** queues a new generation. An existing subtitle export is never overwritten; inspect/manage that file separately if replacing a finished result.
+
+**Supprimer** removes one inactive history entry, its checkpoints and temporary work files after confirmation. **Nettoyer l’historique** selects inactive entries in the current folder/search/filter across all pages (up to 500 per confirmation). Cancel active jobs first; deletion is refused while a cancellation is still running and is serialized with synchronization decisions. MKVs, source subtitles, provider profiles and exported sidecars remain on disk. If permissions prevent work-file cleanup, the UI reports the leftover files instead of claiming complete cleanup. **Reprendre les erreurs** follows the same folder/search/filter scope across pages.
 
 ## 6. Security, privacy, and limitations
 

@@ -123,6 +123,20 @@ class Store:
         with self.connect() as db:
             db.executemany("INSERT OR REPLACE INTO checkpoints VALUES(?,?,?)", [(jid, k, v) for k,v in translations.items()])
 
+    def delete_jobs(self, ids: list[str]):
+        # Recheck under the same write transaction as deletion: a concurrent
+        # resume must either win and block deletion, or find a missing job.
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for jid in ids:
+                row = db.execute("SELECT data FROM jobs WHERE id=?", (jid,)).fetchone()
+                if not row:
+                    raise ValueError("Une traduction n’existe plus. Actualisez l’historique.")
+                if json.loads(row[0])["status"] not in {"completed", "review", "error", "cancelled", "interrupted"}:
+                    raise ValueError("Annulez les traitements actifs avant de les supprimer.")
+            db.executemany("DELETE FROM checkpoints WHERE job=?", [(jid,) for jid in ids])
+            db.executemany("DELETE FROM jobs WHERE id=?", [(jid,) for jid in ids])
+
     def translations(self, jid: str) -> dict[str,str]:
         with self.connect() as db:
             return dict(db.execute("SELECT id,text FROM checkpoints WHERE job=?", (jid,)).fetchall())

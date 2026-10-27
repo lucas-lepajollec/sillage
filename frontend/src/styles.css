@@ -1119,6 +1119,42 @@ main {
   overflow-wrap: anywhere;
 }
 .job-source-track > svg { flex-shrink: 0; margin-top: 3px; }
+.jobs-view-toolbar,
+.jobs-view-toggle,
+.jobs-folder-navigation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.jobs-view-toolbar { justify-content: space-between; margin: 20px 0 12px; }
+.jobs-folder-navigation { padding: 12px 0; color: var(--muted); font-size: 13px; }
+.jobs-folder-navigation small { flex-basis: 100%; overflow-wrap: anywhere; }
+.job-folder-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 12px; }
+.job-folder-grid .job-folder-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  padding: 20px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.job-folder-card:hover { background: var(--hover); border-color: var(--accent-line); }
+.job-folder-card > svg { color: var(--accent); flex-shrink: 0; margin-top: 3px; }
+.job-folder-card > svg:last-child { margin-left: auto; }
+.job-folder-card > span { display: flex; flex-direction: column; gap: 7px; min-width: 0; overflow-wrap: anywhere; }
+.job-folder-card strong { font-size: 15px; }
+.job-folder-card small,
+.job-folder-card > span > span { color: var(--muted); font-size: 12px; }
+.history-delete-list { padding-left: 20px; font-size: 13px; }
+.history-delete-list li { margin: 10px 0; overflow-wrap: anywhere; }
+.history-delete-list small { display: block; color: var(--muted); font-size: 12px; }
+.job-card-footer { flex-wrap: wrap; }
+.job-card-footer > div { flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.reanalysis-notice { padding: 14px 20px; color: var(--muted); font-size: 12px; line-height: 1.7; border-bottom: 1px solid var(--line); }
 .episode-status {
   display: flex;
   align-items: center;

@@ -40,6 +40,7 @@ for (const mobile of [false, true]) {
       await expect.poll(() => reads).toBeGreaterThan(before);
     };
     await page.goto("/#traductions");
+    await page.getByRole("button", { name: "Liste", exact: true }).click();
     const top = page.getByRole("navigation", { name: "Pagination des traductions en haut", exact: true });
     const bottom = page.getByRole("navigation", { name: "Pagination des traductions en bas", exact: true });
     const cards = page.locator(".job-card");
