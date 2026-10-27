@@ -34,6 +34,9 @@ export function PreviewDrawer({
   job,
   trackId,
   onTrackChange,
+  trackSelectionMode,
+  onTrackReset,
+  onApplyToGroup,
   notify,
 }: {
   open: boolean;
@@ -42,6 +45,9 @@ export function PreviewDrawer({
   job?: Job | null;
   trackId?: string;
   onTrackChange?: (id: string) => void;
+  trackSelectionMode?: "auto" | "manual";
+  onTrackReset?: () => void;
+  onApplyToGroup?: () => void;
   notify: (text: string, error?: boolean) => void;
 }) {
   const client = useQueryClient();
@@ -85,6 +91,7 @@ export function PreviewDrawer({
     setShowTags(false);
   }, [episode?.path, job?.id, trackId]);
   const data = query.data;
+  const displayedTrack = job ? data?.source_track || job.source_track : sourceTrack;
   const cues =
     data?.cues.filter(
       (cue) =>
@@ -155,7 +162,7 @@ export function PreviewDrawer({
             )}
             <span>
               <Subtitles size={13} />
-              {data ? `${data.cues.length} répliques` : "Piste source"}
+              {data ? `${data.cues.length} événements` : "Piste source"}
             </span>
           </div>
           <div
@@ -185,6 +192,35 @@ export function PreviewDrawer({
             </button>
           </div>
           <div className="drawer-content">
+            <section className="source-track-info" aria-label="Informations de la piste source">
+              <span className="eyebrow">{job ? "PISTE DU TRAITEMENT" : "PISTE À TRADUIRE"}</span>
+              <strong>{displayedTrack ? trackLabel(displayedTrack) : job ? `Identifiant : ${job.track_id}` : "Choisissez une piste"}</strong>
+              {displayedTrack && (displayedTrack.forced || /signs?\s*(only|&|\/|and)|panneaux/i.test(displayedTrack.title)) &&
+                <small className="source-track-caution">Piste forcée ou de panneaux/chansons : elle peut ne pas contenir les dialogues complets.</small>}
+              {job ? <small>
+                {data?.source_track_origin === "current" ? "Ancien traitement : libellé lu dans le fichier actuel, non enregistré au lancement. " :
+                  !displayedTrack ? "Le libellé de cette ancienne piste n’a pas été enregistré. " : "Piste enregistrée pour ce traitement. "}
+                Reprendre utilise cette même piste. Pour en changer, créez une nouvelle traduction dans l’explorateur.
+              </small> : <>
+                <small>{trackSelectionMode === "manual" ? "Votre choix pour cet épisode." : "Choix automatique : priorité à une piste anglaise complète par défaut."} Les choix préparés seront utilisés au lancement de la traduction ; un nouveau scan les réinitialise.</small>
+                <label className="preview-track-label">Piste à prévisualiser
+                  <select aria-label="Piste à prévisualiser" value={trackId || ""} onChange={(e) => onTrackChange?.(e.target.value)}>
+                    {episode?.tracks.map((track) => <option key={track.id} value={track.id} disabled={!track.supported}>
+                      {trackLabel(track)}{!track.supported ? " · graphique, non traduit" : ""}
+                    </option>)}
+                  </select>
+                </label>
+                <div className="source-track-actions">
+                  {trackSelectionMode === "manual" && <Button variant="ghost" size="sm" onClick={onTrackReset}>Revenir au choix automatique</Button>}
+                  <Button variant="outline" size="sm" onClick={onApplyToGroup}>Appliquer à d’autres épisodes</Button>
+                </div>
+              </>}
+              {data?.stats && <div className="source-track-stats" aria-label="Comptage des événements">
+                <span><b>{data.stats.translatable}</b> à traduire par l’IA</span>
+                <span><b>{data.stats.preserved}</b> conservés sans traduction</span>
+              </div>}
+              {!job && <small>L’aperçu n’appelle pas l’IA. Un événement ASS n’est pas forcément une phrase unique.</small>}
+            </section>
             {data && (
               <div
                 className={cn("timing-notice", reviewing && "review-notice")}
@@ -246,22 +282,6 @@ export function PreviewDrawer({
             )}
             {tab === "cues" && (
               <div role="tabpanel" id="cues-panel" aria-labelledby="cues-tab">
-                {episode && episode.tracks.length > 1 && (
-                  <label className="preview-track-label">
-                    Piste à prévisualiser
-                    <select
-                      value={trackId || ""}
-                      onChange={(e) => onTrackChange?.(e.target.value)}
-                    >
-                      {episode.tracks.map((track) => (
-                        <option key={track.id} value={track.id}>
-                          {trackLabel(track)}
-                          {!track.supported ? " · graphique" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
                 {query.isPending && (job || sourceTrack?.supported) && (
                   <Spinner>Lecture des répliques…</Spinner>
                 )}

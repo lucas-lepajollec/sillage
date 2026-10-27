@@ -43,6 +43,9 @@ export type Cue = {
 };
 export type Preview = {
   format: string;
+  source_track?: Track | null;
+  source_track_origin?: "recorded" | "current" | "unavailable";
+  stats?: { events: number; translatable: number; preserved: number };
   cues: Cue[];
   warnings: string[];
   timing_status: string;
@@ -106,6 +109,7 @@ export type Job = {
   path: string;
   name: string;
   track_id: string;
+  source_track?: Track;
   provider_id: string;
   status: JobStatus;
   progress: number;

@@ -138,7 +138,11 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
                 worker.validate_duration(doc, info["duration"])
             except ValueError as exc:
                 warnings.append(str(exc))
-            return {"format": doc.format, "cues": doc.cues, "warnings": warnings, "timing_status": "Timings source — audio non vérifié"}
+            track = next(t for t in info["tracks"] if t["id"] == data.track_id)
+            return {"format": doc.format, "cues": doc.cues, "warnings": warnings,
+                    "source_track": {k: v for k, v in track.items() if k != "path"}, "source_track_origin": "current",
+                    "stats": {"events": len(doc.cues), "translatable": len(doc.segments), "preserved": len(doc.cues) - len(doc.segments)},
+                    "timing_status": "Timings source — audio non vérifié"}
 
     @app.get("/api/providers")
     def list_providers():

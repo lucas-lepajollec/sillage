@@ -1,15 +1,15 @@
-# Verification status — 2026-10-26
+# Verification status — 2026-10-27
 
-Sillage 0.0.4 adds paginated translations and readable mobile form controls. Release numbering now increments only the final component (`0.0.X`); historical tags remain intact. Version 0.3.0 introduced the common reasoning preference, required-reasoning warnings and six additional cloud/local services. Adaptive batches and zero-duration source-event preservation from 0.2.2 remain. It uses Docker port 2511 and development browser port 2499. Version 0.2.0 adds guided cloud/local provider setup and live model discovery, alongside structured translation reliability fixes. Screenshots use fictional dialogue encoded into real generated MKVs and test-only provider profiles, never private media or credentials. The production app has no simulated provider.
+Sillage 0.0.5 adds explicit individual/group source-track selection, source metadata in jobs and previews, and eligible/preserved event counts. Version 0.0.4's paginated translations and readable mobile controls remain. Release numbering increments only the final component (`0.0.X`); historical tags remain intact. The common reasoning preference, thirteen providers, adaptive batches and zero-duration preservation remain. Docker uses2511 and development uses2499. Screenshots use fictional dialogue encoded into generated MKVs and test-only provider profiles, never private media or credentials. The production app has no simulated provider.
 
 ## Executed validation
 
 | Check | Observed result |
 | --- | --- |
-| Backend suite | **331 passing tests**: generated real media, ASS/SSA/SRT invariants, filesystem confinement/atomic exports, thirteen provider/catalogue protocols, checkpoints/resume/cancellation, sync guards and API. Includes output-budget/recovery, catalogue bounds/pagination and saved-key isolation regressions. |
+| Backend suite | **334 passing tests**: generated real media, ASS/SSA/SRT invariants, filesystem confinement/atomic exports, thirteen provider/catalogue protocols, checkpoints/resume/cancellation, sync guards and API. Includes source metadata snapshots, legacy previews with unavailable media, eligible/preserved counts, output-budget/recovery and saved-key isolation. |
 | Ruff | Backend, tests and maintenance scripts pass. |
 | Frontend | TypeScript and Vite production build pass. |
-| Browser | **10 Chromium workflows pass**: real API/worker/HTTP provider ASS/SRT processing; guided provider setup on desktop/mobile; saved-key reuse, multiple profiles, stale-catalogue isolation, manual fallback, model search, empty results and light/short-height layouts. Includes selecting/saving mandatory-reasoning models, local optional keys and review warnings with real exports. Pagination tests cover desktop/mobile page sizes, boundaries, search/status resets, actual polling stability and shrinking results. Mobile computed font sizes are checked across search, preview and advanced provider fields, with manual zoom still permitted. Cloud catalogue responses and synthetic job histories in browser-only scenarios are isolated fixtures. |
+| Browser | **13 Chromium checks pass**: real API/worker/HTTP provider ASS/SRT processing; guided provider setup on desktop/mobile; saved-key reuse, multiple profiles, stale-catalogue isolation, manual fallback, model search, empty results and light/short-height layouts. Includes selecting/saving mandatory-reasoning models, local optional keys and review warnings with real exports. Pagination tests cover desktop/mobile page sizes, boundaries, search/status resets, actual polling stability and shrinking results. Mobile computed font sizes are checked across search, preview and advanced provider fields, with manual zoom still permitted. Source-track checks cover reordered streams, missing/ambiguous matches, selected/folder/all-scan scopes, automatic resets, individual previews and zero generation requests on desktop/mobile. Cloud catalogue responses and synthetic job histories in browser-only scenarios are isolated fixtures. |
 | Local container | Build and full smoke pass on linux/amd64: compiled UI, media tools, non-root worker, real ASS/SRT HTTP pipeline, exports/downloads, preserved timings/MKV hashes and healthcheck. |
 | Visual review | Rendered dark/light desktop, provider setup at 1440×1000 and 1280×640, and mobile at 390×844; subtitle tags are available through an explicit toggle. |
 | Publication contract | Canonical Compose is image-only, README example is identical, source builds use a separate override. Native amd64/arm64 publication jobs smoke-test immutable registry candidates before promotion. Live publication status is shown by GitHub Actions and GHCR. |
@@ -36,6 +36,8 @@ Catalogue tests verify thirteen native/compatible GET endpoints, native authenti
 ## Evidence and reproduction
 
 [Explorer](screenshots/explorer-dark.png) · [Translated preview](screenshots/translation-preview-dark.png) · [Light theme](screenshots/translations-light.png) · [Mobile preview](screenshots/preview-mobile.png) · [Mobile settings](screenshots/settings-mobile.png).
+
+[Source-track matching](screenshots/source-track-matching-desktop.png) · [Mobile source tracks](screenshots/source-track-matching-mobile.png).
 
 [Paginated translations](screenshots/translations-pagination-desktop.png) · [Mobile pagination](screenshots/translations-pagination-mobile.png).
 

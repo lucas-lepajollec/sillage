@@ -14,7 +14,25 @@ def test_api_health_browse_scan_preview_and_no_side_effect(video, tmp_path):
         assert preview.status_code == 200
         assert "Hello world" in preview.json()["cues"][0]["text"]
         assert "audio non vérifié" in preview.json()["timing_status"]
+        assert preview.json()["source_track"]["id"] == episode["tracks"][0]["id"]
+        assert preview.json()["stats"] == {"events": 2, "translatable": 2, "preserved": 0}
         assert not video.with_suffix(".fr.srt").exists()
+
+
+def test_external_track_preview_counts_protected_events_without_provider(video, tmp_path):
+    from conftest import ASS
+    sidecar = video.with_suffix(".en.ass")
+    sidecar.write_text(ASS.replace(",0,0,0,,", ",0,0,0,custom,", 1))
+    app = create_app(tmp_path / "config", [video.parent], run_worker=False)
+    with TestClient(app) as client:
+        response = client.post("/api/preview", json={"path": str(video), "track_id": f"external:{sidecar.name}"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["source_track"]["external"]
+        assert "path" not in data["source_track"]
+        assert data["stats"] == {"events": 2, "translatable": 1, "preserved": 1}
+        assert len(data["warnings"]) == 1
+        assert not app.state.store.jobs()
 
 
 def test_auth_and_origin_host_guards(video, tmp_path, monkeypatch):

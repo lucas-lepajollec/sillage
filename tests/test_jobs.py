@@ -1,5 +1,6 @@
 import hashlib
 from pathlib import Path
+from subprocess import TimeoutExpired
 from unittest.mock import patch
 
 import pytest
@@ -51,8 +52,47 @@ async def test_real_pipeline_preserves_mkv_and_timestamps(media_factory, tmp_pat
     assert "audio non vérifié" in result["timing_status"]
     assert hashlib.sha256(video.read_bytes()).hexdigest() == mkv_hash
     preview = worker.preview(job["id"])
+    assert job["source_track"]["id"] == request["items"][0]["track_id"]
+    assert preview["source_track"]["id"] == job["track_id"]
+    assert preview["source_track_origin"] == "recorded"
+    assert preview["stats"] == {"events": 2, "translatable": 2, "preserved": 0}
     assert "Bonjour" in preview["cues"][0]["translated"]
     assert "__SILLAGE_" not in preview["cues"][0]["translated"]
+
+
+async def test_old_job_preview_labels_current_metadata_without_changing_checkpoints(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    job.pop("source_track")
+    store.put_job(job)
+    work = store.folder / "work" / job["id"]
+    work.mkdir(parents=True)
+    source, _ = worker.library.extract(video, job["track_id"], work)
+    store.patch(job["id"], source_file=str(source))
+    store.checkpoint(job["id"], {"e000001": "Bonjour !"})
+    # Recorded source stays available even when the container no longer exists.
+    current = worker.preview(job["id"])
+    assert current["source_track_origin"] == "current"
+    assert current["source_track"]["id"] == job["track_id"]
+    for unavailable in [FileNotFoundError(), TimeoutExpired("ffprobe", 90)]:
+        with patch.object(worker.library, "inspect", side_effect=unavailable):
+            preview = worker.preview(job["id"])
+        assert preview["source_track"] is None
+        assert preview["source_track_origin"] == "unavailable"
+        assert preview["cues"][0]["translated"] == "Bonjour !"
+    assert store.translations(job["id"]) == {"e000001": "Bonjour !"}
+
+
+async def test_recorded_source_metadata_is_stable_when_container_labels_change(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    with patch("sillage.jobs.providers.translate", side_effect=deterministic):
+        await worker.process(job["id"])
+    snapshot = store.job(job["id"])["source_track"]
+    with patch.object(worker.library, "inspect", side_effect=AssertionError("No live inspection for recorded metadata")):
+        preview = worker.preview(job["id"])
+    assert preview["source_track"] == snapshot
+    assert preview["source_track_origin"] == "recorded"
 
 
 async def test_missing_llm_segment_is_never_published(video, tmp_path):

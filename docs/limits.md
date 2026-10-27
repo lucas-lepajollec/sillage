@@ -8,6 +8,10 @@ Les overrides et retours `\N`/`\n` sont protégés par placeholders ordonnés. U
 
 Le modèle peut conserver l’ordre des balises tout en produisant une traduction dont la mise en emphase est imparfaite ; aucune validation structurelle ne prouve la qualité sémantique. Les chevauchements intentionnels sont préservés. Les ASS non standard/incomplets peuvent être refusés : l’application ne prétend pas accepter tous les fansubs. Les polices, collisions visuelles, longueurs de panneaux et effets de composition doivent être vérifiés dans votre lecteur. Aucun test ici ne certifie toute une collection Jellyfin.
 
+L’aperçu distingue les événements traduisibles de ceux conservés sans traduction ; il ne fait aucun appel au fournisseur. Le total d’une traduction compte les événements éligibles, sans dédupliquer les textes répétés. Les avertissements ASS ne sont pas des échecs d’appel au modèle. Par prudence, tout champ ASS « Effect » non vide conserve l’événement sans traduction, même si ce champ seul ne prouve pas une animation.
+
+Le choix de piste se fait dans Sillage, indépendamment du choix de votre lecteur. L’application en groupe compare les métadonnées et ignore les correspondances absentes ou ambiguës ; elle ne garantit pas qu’un titre de piste décrit correctement son contenu. Les choix préparés ne modifient pas les traitements existants. Une reprise utilise la piste initiale ; pour en changer, créez un nouveau traitement. Les anciens traitements sans métadonnées enregistrées peuvent montrer le libellé du conteneur actuel, identifié comme tel, sans certifier son libellé au lancement.
+
 ## Synchronisation
 
 La traduction ne vérifie pas l’alignement audio. Un décalage manuel est enregistré et soumis aux mêmes contrôles de durée. La précision ASS est de 10 ms : un décalage non représentable est refusé, sans arrondi caché.

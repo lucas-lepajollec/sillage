@@ -8,6 +8,7 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
+from subprocess import TimeoutExpired
 
 from . import providers
 from .media import MediaLibrary
@@ -121,6 +122,7 @@ class Worker:
             if not os.access(path.parent, os.W_OK):
                 raise ValueError("Le dossier média n’est pas accessible en écriture.")
             job = {"id": uuid.uuid4().hex, "path": str(path), "name": path.name, "track_id": item["track_id"],
+                   "source_track": {k: v for k, v in track.items() if k != "path"},
                    "provider_id": config["id"], "status": "queued", "progress": 0, "done": 0, "total": 0,
                    "error": None, "warnings": [], "output": None, "created_at": now(),
                    "sync_mode": data.get("sync_mode", "preserve"), "offset_ms": offset, "timing_status": "Non vérifiés",
@@ -147,7 +149,9 @@ class Worker:
         doc = SubtitleDocument.load(source)
         self.validate_duration(doc, info["duration"])
         warnings = list(dict.fromkeys(doc.warnings + job.get("warnings", [])))
-        self.store.patch(jid, source_hash=digest, source_file=str(source), total=len(doc.segments), warnings=warnings)
+        track = next(t for t in info["tracks"] if t["id"] == job["track_id"])
+        self.store.patch(jid, source_hash=digest, source_file=str(source), total=len(doc.segments), warnings=warnings,
+                         source_track={k: v for k, v in track.items() if k != "path"})
         translations = self.store.translations(jid)
         doc.validate_translations(translations, require_all=False)
         pending = [s for s in doc.segments if s["id"] not in translations]
@@ -340,4 +344,19 @@ class Worker:
             if offset:
                 item |= {"proposed_start": cue["start"]+offset, "proposed_end": cue["end"]+offset}
             cues.append(item)
-        return {"format": doc.format, "cues": cues, "warnings": job["warnings"], "timing_status": job["timing_status"], "sync_pending": job.get("sync_pending", False), "sync_proposal": job.get("sync_proposal")}
+        track = job.get("source_track")
+        track_origin = "recorded" if track else "unavailable"
+        if not track:
+            # Legacy jobs keep the exact stream ID but have no metadata snapshot.
+            # Current container labels are useful, but cannot certify past labels.
+            try:
+                info = self.library.inspect(job["path"])
+                track = next((t for t in info["tracks"] if t["id"] == job["track_id"]), None)
+                track = {k: v for k, v in track.items() if k != "path"} if track else None
+                track_origin = "current" if track else "unavailable"
+            except (ValueError, OSError, TimeoutExpired):
+                pass
+        return {"format": doc.format, "cues": cues, "warnings": job["warnings"], "timing_status": job["timing_status"],
+                "source_track": track, "source_track_origin": track_origin,
+                "stats": {"events": len(doc.cues), "translatable": len(doc.segments), "preserved": len(doc.cues) - len(doc.segments)},
+                "sync_pending": job.get("sync_pending", False), "sync_proposal": job.get("sync_proposal")}

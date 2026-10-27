@@ -26,6 +26,7 @@ import {
   jobLabels,
   retryStatuses,
   timingLabel,
+  trackLabel,
 } from "../lib";
 import type { Job, JobStatus } from "../types";
 import { Button } from "./ui/button";
@@ -397,6 +398,10 @@ export function Translations({
                     value={job.progress}
                     label={`Progression de ${job.name}`}
                   />
+                  <div className="job-source-track">
+                    <Languages size={13} />
+                    <span>Piste source : {job.source_track ? trackLabel(job.source_track) : `${job.track_id} · libellé non enregistré`}</span>
+                  </div>
                   <div className="job-stages">
                     {jobStages.map((stage, i) => (
                       <span

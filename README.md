@@ -23,7 +23,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 
 ## 3. Highlights
 
-- Lazy folder navigation, breadcrumbs, recursive on-demand scans, filters, selection and per-episode source tracks.
+- Lazy folder navigation, breadcrumbs, recursive scans, filters and explicit per-episode source tracks; apply equivalent tracks to selected episodes, one folder or the whole scan with a checked match list.
 - Embedded and external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
 - Reasoning disabled when supported; required reasoning stays usable with explicit time/token warnings.
 - Paginated translation history with search/status filters and readable mobile form fields.
@@ -73,7 +73,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.4` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.5` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 
@@ -92,6 +92,14 @@ Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` b
 Providers, model IDs, source/target languages, glossary, batch size, concurrency, timeouts and retries are configured in the UI. One episode runs at a time, with one provider request at a time by default. See [provider setup](docs/providers.md).
 
 A full French track can be filtered out; forced/signs-only French metadata does not automatically count as a complete translation. Review unknown or incorrect language tags manually.
+
+### Choose and verify the source track
+
+After scanning, use **Piste source** or **Vérifier la piste** for each episode. The preview identifies the selected title, language, format, stream and default/forced/SDH indicators. It shows how many events are eligible for AI translation and how many stay unchanged. Previewing extracts/reads subtitles without contacting a provider. An ASS event is not necessarily a unique sentence; repeated eligible events are counted separately.
+
+Use **Choisir les pistes** to apply equivalent tracks to selected episodes, an exact folder (excluding its subfolders) or all scanned episodes. The review list shows the exact scope, matches and skipped files before applying. Equivalence uses language, normalized title, format, embedded/external kind and forced/SDH indicators, never the stream number. External filenames vary by episode and are not compared. Missing or ambiguous matches keep their current choice. Search and filters do not narrow the explicitly chosen scope. You can return to the automatic choice for the same scope or for one episode. Choices last until a new scan.
+
+New jobs record their source-track metadata and show it in the translation list and preview. Older jobs retain their original track ID; their preview can read its current MKV label, explicitly marked as current metadata rather than a historical snapshot. **Reprendre** uses the original track and checkpoints. To change tracks, create a new translation from the explorer. Applying choices does not modify existing jobs.
 
 ## 6. Security, privacy, and limitations
 
