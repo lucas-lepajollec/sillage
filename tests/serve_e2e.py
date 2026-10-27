@@ -71,6 +71,34 @@ def create_library(root: Path):
     return root
 
 
+def create_track_library(root: Path):
+    # Group selection must survive stream reordering, missing/ambiguous tracks
+    # and a recursive scan containing another season.
+    for number, titles in enumerate([
+        ["Signs & Songs", "Dialogue"], ["Dialogue", "Signs & Songs"],
+        ["Signs & Songs"], ["Dialogue", "Dialogue"], ["Signs & Songs", "Dialogue"],
+    ], 1):
+        folder = root / "Pistes multiples" / ("Saison 02" if number == 5 else "Saison 01")
+        folder.mkdir(parents=True, exist_ok=True)
+        dialogue = folder / "dialogue.ass"
+        signs = folder / "signs.ass"
+        dialogue.write_text(ASS)
+        signs.write_text(ASS[:ASS.index("Dialogue:")] + "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Sign only\n")
+        args = ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=size=64x36:rate=2:duration=6",
+                "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-i", str(dialogue), "-i", str(signs), "-map", "0:v", "-map", "1:a"]
+        for title in titles:
+            args += ["-map", "3:0" if title == "Signs & Songs" else "2:0"]
+        args += ["-t", "6", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-c:s", "copy"]
+        for index, title in enumerate(titles):
+            args += [f"-metadata:s:s:{index}", "language=eng", f"-metadata:s:s:{index}", f"title={title}",
+                     f"-disposition:s:{index}", "forced" if title == "Signs & Songs" else "default"]
+        args += [str(folder / f"Pistes — E0{number}.mkv")]
+        subprocess.run(args, check=True, capture_output=True)
+        dialogue.unlink()
+        signs.unlink()
+    return root
+
+
 if __name__ == "__main__":
     work = Path(tempfile.mkdtemp(prefix="sillage-e2e-"))
     port = int(os.environ.get("E2E_PORT", "5776"))
@@ -78,6 +106,7 @@ if __name__ == "__main__":
     provider = ThreadingHTTPServer(("127.0.0.1", provider_port), TestProvider)
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     library = create_library(work / "Médiathèque de test")
+    create_track_library(library)
     os.environ["FRONTEND_DIST"] = str(Path(__file__).resolve().parents[1] / "frontend" / "dist")
     os.environ.pop("ACCESS_KEY", None)
     app = create_app(work / "config", [library])

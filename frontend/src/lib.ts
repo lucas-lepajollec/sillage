@@ -28,7 +28,7 @@ export const language = (code: string) =>
     "": "Non précisée",
   })[code.toLowerCase() as "en"] || code.toUpperCase();
 export const trackLabel = (track: Track) =>
-  `${language(track.language)} · ${track.format.toUpperCase()}${track.title ? ` · ${track.title}` : ""}${track.external ? " · externe" : ""}${track.forced ? " · forced" : ""}${track.sdh ? " · SDH" : ""}`;
+  `${language(track.language)} · ${track.format.toUpperCase()}${track.title ? ` · ${track.title}` : ""}${track.external ? " · externe" : ` · flux ${track.index ?? "?"}`}${track.default ? " · par défaut" : ""}${track.forced ? " · forcée" : ""}${track.sdh ? " · SDH" : ""}`;
 export const preferredTrack = (episode: Episode) => {
   const english = episode.tracks.filter(
     (t) => t.supported && ["en", "eng"].includes(t.language.toLowerCase()),

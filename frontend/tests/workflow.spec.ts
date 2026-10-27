@@ -95,6 +95,7 @@ test("real library → track preview → provider → selected episodes → expo
     timeout: 30_000,
   });
   await expect(page.locator(".job-card")).toHaveCount(2);
+  await expect(page.locator(".job-source-track").first()).toContainText("English · Full dialogue");
   await page.locator(".job-warnings summary").first().click();
   await expect(page.locator(".job-warnings").first()).toContainText("désactivation du raisonnement ne peut pas être confirmée");
   await expect(page.getByText("Lots ≤ 4 répliques", { exact: false }).first()).toBeVisible();
@@ -106,6 +107,7 @@ test("real library → track preview → provider → selected episodes → expo
   await expect(
     page.getByRole("dialog").locator(".cue-translated").first(),
   ).toContainText("Bonjour");
+  await expect(page.getByRole("dialog").getByLabel("Informations de la piste source")).toContainText("Piste enregistrée pour ce traitement");
   await expect(page.getByRole("dialog")).toContainText(
     "Timings source préservés",
   );

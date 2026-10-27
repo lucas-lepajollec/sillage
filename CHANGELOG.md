@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.5 — 2026-10-27
+
+- Make source-track selection explicit per episode, with a direct preview, automatic/manual choice labels and default/forced/SDH/stream metadata. Highlight forced/signs-only sources and show eligible versus preserved event counts without an AI call.
+- Apply equivalent source tracks to selected episodes, one exact folder or all scanned episodes, with a per-file match review. Match semantic metadata rather than stream indices; skip missing/ambiguous tracks and support restoring automatic choices.
+- Record source-track metadata in new jobs and show it in their cards/previews. Legacy previews distinguish current-container labels from recorded metadata; existing jobs/checkpoints keep their original source. No database migration, media change or provider-call policy change.
+
 ## 0.0.4 — 2026-10-26
 
 - Paginate translations with 10 jobs per page by default and 5/10/25 choices, result ranges and previous/next controls above and below the list. Search/filter changes return to page one; live progress refreshes keep the selected page, and shrinking results clamp to a valid page. Global counts and bulk retry still cover the whole queue.

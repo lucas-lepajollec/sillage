@@ -22,6 +22,7 @@ import {
   ChevronsUpDown,
   Clock3,
   FileVideo2,
+  Eye,
   Folder,
   FolderOpen,
   HardDrive,
@@ -51,6 +52,7 @@ import type { Browse, Episode, Job, Provider, Scan, SyncMode } from "../types";
 import { Button } from "./ui/button";
 import { Empty, ErrorNotice, Modal, Spinner, StepHint } from "./shared";
 import { PreviewDrawer } from "./preview";
+import { TrackSelection } from "./track-selection";
 
 export function LibraryTree({
   path,
@@ -237,6 +239,7 @@ export function Explorer({
   ]);
   const [tracks, setTracks] = useState<Record<string, string>>({});
   const [detail, setDetail] = useState<Episode | null>(null);
+  const [trackSelection, setTrackSelection] = useState<{ initial?: Episode } | null>(null);
   const [providerId, setProviderId] = useState("");
   const [syncMode, setSyncMode] = useState<SyncMode>("preserve");
   const [offset, setOffset] = useState(0);
@@ -290,6 +293,7 @@ export function Explorer({
     setSelection({});
     setSearch("");
     setDetail(null);
+    setTrackSelection(null);
   }, [path]);
   useEffect(() => {
     localStorage.setItem("sillage.filters", JSON.stringify(filters));
@@ -415,9 +419,12 @@ export function Explorer({
             </select>
             <ChevronDown size={12} />
             <span className="track-count">
-              {e.tracks.length} piste{e.tracks.length > 1 ? "s" : ""}
+              {tracks[e.path] ? "Votre choix" : "Choix automatique"} · {e.tracks.length} piste{e.tracks.length > 1 ? "s" : ""}
               {e.tracks.some((t) => t.external) ? " · externe incluse" : ""}
             </span>
+            <button className="track-preview-link" onClick={() => setDetail(e)} aria-label={`Vérifier la piste de ${e.name}`}>
+              <Eye size={12} />Vérifier la piste
+            </button>
           </div>
         ) : (
           <span className="muted">Aucun sous-titre</span>
@@ -697,6 +704,12 @@ export function Explorer({
                 <ChevronDown size={12} />
               </button>
             </div>
+            {episodes.length > 0 && <div className="source-selection-toolbar">
+              <div><strong>Pistes source</strong><small>Vérifiez chaque épisode ou appliquez votre choix en groupe.</small></div>
+              <Button variant="outline" onClick={() => setTrackSelection({})}>
+                <Subtitles size={15} />Choisir les pistes
+              </Button>
+            </div>}
             {(filterOpen || filterCount > 0) && (
               <div className="filters" aria-label="Filtres des épisodes">
                 <label>
@@ -999,8 +1012,34 @@ export function Explorer({
           detail ? tracks[detail.path] || preferredTrack(detail)?.id : undefined
         }
         onTrackChange={(id) => detail && changeTrack(detail, id)}
+        trackSelectionMode={detail && tracks[detail.path] ? "manual" : "auto"}
+        onTrackReset={() => detail && setTracks((old) => {
+          const next = { ...old };
+          delete next[detail.path];
+          return next;
+        })}
+        onApplyToGroup={() => {
+          if (detail) setTrackSelection({ initial: detail });
+          setDetail(null);
+        }}
         notify={notify}
       />
+      {trackSelection && <TrackSelection
+        episodes={episodes} selected={selected} tracks={tracks} initial={trackSelection.initial}
+        onClose={() => setTrackSelection(null)}
+        onApply={(changes) => {
+          setTracks((old) => {
+            const next = { ...old };
+            for (const [path, id] of Object.entries(changes)) {
+              if (id) next[path] = id;
+              else delete next[path];
+            }
+            return next;
+          });
+          setTrackSelection(null);
+          notify(`Choix de piste appliqué à ${Object.keys(changes).length} épisode(s).`);
+        }}
+      />}
       <Modal
         open={syncOpen}
         onOpenChange={setSyncOpen}
