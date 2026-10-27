@@ -84,7 +84,12 @@ test("mobile reanalysis prepares one real source without starting a generation",
     return route.fulfill({ json: [job] });
   });
   await page.route("**/api/jobs/*/reanalyze", (route) => route.fulfill({ json: episode }));
-  await page.goto("/#traductions");
+  await page.route("**/api/scan", (route) => route.fulfill({ status: 400, json: { detail: "Erreur d’analyse de test" } }));
+  await page.goto("/");
+  await page.getByTestId("scan-button").click();
+  await expect(page.locator(".explorer-page")).toContainText("Erreur d’analyse de test");
+  await page.getByRole("button", { name: "Ouvrir la navigation", exact: true }).click();
+  await page.getByRole("link", { name: "Traductions", exact: true }).click();
   await page.locator(".job-folder-card").click();
   await page.getByRole("button", { name: `Réanalyser ${job.name}`, exact: true }).click();
   await expect(page.getByRole("dialog").getByLabel("Informations de la piste source")).toContainText("Dialogue");
@@ -95,5 +100,8 @@ test("mobile reanalysis prepares one real source without starting a generation",
   await expect(page.locator(".reanalysis-notice")).toContainText("L’ancien traitement et ses checkpoints sont conservés");
   await expect(page.getByText("1 épisode", { exact: true })).toBeVisible();
   await expect(page.getByLabel(`Sélectionner ${job.name}`, { exact: true })).toBeChecked();
+  await expect(page.locator(".explorer-page")).not.toContainText("Erreur d’analyse de test");
+  await page.getByRole("button", { name: "Dossier parent", exact: true }).click();
+  await expect(page.locator(".reanalysis-notice")).toHaveCount(0);
   expect(generations).toBe(0);
 });

@@ -301,9 +301,11 @@ export function Explorer({
     setSearch("");
     setDetail(null);
     setTrackSelection(null);
+    setInspected(null);
   }, [path]);
   useEffect(() => {
     if (!reanalysis) return;
+    scan.reset();
     const { episode, job } = reanalysis;
     const folder = episode.path.slice(0, episode.path.lastIndexOf("/"));
     setInspected({ path: folder, data: { episodes: [episode], errors: [] } });
