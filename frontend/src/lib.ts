@@ -48,6 +48,8 @@ export const canTranslate = (episode: Episode) =>
   !episode.error && episode.tracks.some((t) => t.supported);
 export const jobLabels: Record<JobStatus, string> = {
   queued: "En attente",
+  pausing: "Pause demandée",
+  paused: "En pause",
   extracting: "Extraction",
   translating: "Traduction",
   validating: "Validation",
@@ -61,13 +63,14 @@ export const jobLabels: Record<JobStatus, string> = {
 };
 export const activeStatuses: JobStatus[] = [
   "queued",
+  "pausing",
   "extracting",
   "translating",
   "validating",
   "syncing",
   "writing",
 ];
-export const retryStatuses: JobStatus[] = ["error", "cancelled", "interrupted"];
+export const retryStatuses: JobStatus[] = ["paused", "error", "cancelled", "interrupted"];
 export const timingLabel = (status: string) =>
   ({
     preserved: "Timings source préservés",
@@ -79,3 +82,13 @@ export const timingLabel = (status: string) =>
   })[status as "preserved"] ||
   status ||
   "Non vérifié";
+
+// Keep large ASS effect counts readable; each affected event remains visible in the preview.
+export function warningGroups(warnings: string[]) {
+  const groups = new Map<string, number>();
+  for (const warning of warnings) {
+    const message = warning.replace(/^e[0-9]+\s*:\s*/, "");
+    groups.set(message, (groups.get(message) || 0) + 1);
+  }
+  return [...groups].map(([message, count]) => ({ message, count }));
+}

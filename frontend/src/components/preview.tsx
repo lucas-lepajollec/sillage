@@ -22,6 +22,7 @@ import {
   timestamp,
   timingLabel,
   trackLabel,
+  warningGroups,
 } from "../lib";
 import type { Episode, Job, Preview } from "../types";
 import { Button } from "./ui/button";
@@ -218,6 +219,7 @@ export function PreviewDrawer({
               {data?.stats && <div className="source-track-stats" aria-label="Comptage des événements">
                 <span><b>{data.stats.translatable}</b> à traduire par l’IA</span>
                 <span><b>{data.stats.preserved}</b> conservés sans traduction</span>
+                {!!data.stats.frame_animation && <span><b>{data.stats.frame_animation}</b> effets image par image conservés à l’identique</span>}
               </div>}
               {!job && <small>L’aperçu n’appelle pas l’IA. Un événement ASS n’est pas forcément une phrase unique.</small>}
             </section>
@@ -275,8 +277,8 @@ export function PreviewDrawer({
                   {data.warnings.length} avertissement
                   {data.warnings.length > 1 ? "s" : ""}
                 </summary>
-                {data.warnings.map((warning, i) => (
-                  <p key={i}>{warning}</p>
+                {warningGroups(data.warnings).map(({ message, count }) => (
+                  <p key={message}>{count > 1 ? `${count} événements · ` : ""}{message}</p>
                 ))}
               </details>
             )}

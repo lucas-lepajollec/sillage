@@ -18,9 +18,14 @@ from .storage import Store, now, provider_fingerprint as fingerprint
 from .subtitles import SubtitleDocument
 from .sync import propose_sync
 
-ACTIVE = {"queued", "extracting", "translating", "validating", "syncing", "writing"}
+ACTIVE = {"queued", "extracting", "translating", "validating", "syncing", "writing", "pausing"}
+RESERVED = ACTIVE | {"paused"}
 RUNTIME_FIELDS = ("batch_size", "concurrency", "timeout", "retries")
 FINAL = {"completed", "review", "error", "cancelled", "interrupted"}
+
+
+class JobPaused(Exception):
+    """A normal, durable suspension at a checkpoint boundary."""
 
 
 def target_code(config: dict) -> str:
@@ -45,7 +50,9 @@ class Worker:
 
     async def start(self):
         for job in self.store.jobs():
-            if job["status"] in ACTIVE:
+            if job["status"] == "pausing" or job.get("pause_requested"):
+                self.store.patch(job["id"], status="paused", pause_requested=False)
+            elif job["status"] in ACTIVE:
                 self.store.patch(job["id"], status="interrupted", error="Traitement interrompu au redémarrage. Reprenez-le pour continuer les batches validés.")
         self.task = asyncio.create_task(self.loop())
 
@@ -58,7 +65,9 @@ class Worker:
             except asyncio.CancelledError:
                 pass
         if self.active:
-            self.store.patch(self.active, status="interrupted", error="Service arrêté. Les batches validés sont conservés.")
+            job = self.store.job(self.active)
+            self.store.patch(self.active, status="paused" if job.get("pause_requested") else "interrupted",
+                             pause_requested=False, error="Service arrêté. Les batches validés sont conservés.")
 
     async def loop(self):
         while not self.stopping:
@@ -70,7 +79,12 @@ class Worker:
             self.active = job["id"]
             try:
                 await self.process(job["id"])
+            except JobPaused:
+                pass
             except asyncio.CancelledError:
+                current = self.store.job(job["id"])
+                self.store.patch(job["id"], status="paused" if current.get("pause_requested") or current["status"] in {"paused", "pausing"} else "interrupted",
+                                 pause_requested=False)
                 raise
             except (ValueError, OSError) as exc:
                 # All provider errors are sanitized by the adapter. Never return arbitrary traceback/tool output.
@@ -88,6 +102,27 @@ class Worker:
         if self.cancelled(jid):
             raise ValueError("Traitement annulé. Les batches validés sont conservés.")
 
+    def pause_requested(self, jid: str) -> bool:
+        job = self.store.job(jid)
+        return bool(job.get("pause_requested") or job["status"] == "paused")
+
+    def check_pause(self, jid: str):
+        self.check_cancel(jid)
+        if self.pause_requested(jid):
+            self.store.patch(jid, status="paused", pause_requested=False, error=None)
+            raise JobPaused
+
+    def pause_many(self, ids: list[str]) -> list[dict]:
+        if not 1 <= len(ids) <= 500 or len(set(ids)) != len(ids):
+            raise ValueError("Sélectionnez entre 1 et 500 traitements distincts.")
+        jobs = [self.store.job(jid) for jid in ids]
+        if any(job["status"] not in (RESERVED - {"writing"}) or job.get("sync_pending") for job in jobs):
+            raise ValueError("Mettez en pause uniquement des traitements en attente ou en cours, avant l’écriture.")
+        # Called on the queue's event loop: validate the whole selection before
+        # mutation, without an await that could let another job start in between.
+        return [self.store.patch(job["id"], status="pausing" if self.active == job["id"] else "paused",
+                                 pause_requested=self.active == job["id"]) for job in jobs]
+
     async def create(self, data: dict) -> list[dict]:
         async with self.create_lock:
             return await self._create(data)
@@ -104,7 +139,7 @@ class Worker:
         if not isinstance(offset, int) or abs(offset) > 600_000:
             raise ValueError("Le décalage manuel est limité à ±10 minutes.")
         prepared, seen = [], set()
-        busy = {j["path"] for j in self.store.jobs() if j["status"] in ACTIVE or j.get("sync_pending")}
+        busy = {j["path"] for j in self.store.jobs() if j["status"] in RESERVED or j.get("sync_pending")}
         for item in items:
             path = self.library.resolve(item["path"])
             if str(path) in busy or str(path) in seen:
@@ -180,7 +215,8 @@ class Worker:
                     warnings.append(warning)
             changes[jid] = {"provider_id": provider_id, "provider_snapshot": self.store.seal_config(config),
                             "translation_profile": self.profile_label(config), "config_fingerprint": fingerprint(config),
-                            "status": "queued", "error": None, "cancel_requested": False, "sync_pending": False,
+                            "status": "paused" if job["status"] == "paused" else "queued", "error": None,
+                            "cancel_requested": False, "pause_requested": False, "sync_pending": False,
                             "sync_proposal": None, "write_hash": None, "batch_policy": {},
                             "adaptive_batch_size": providers.initial_batch_size(config), "warnings": [] if restart else warnings}
             if restart:
@@ -190,7 +226,7 @@ class Worker:
 
     async def process(self, jid: str):
         job = self.store.job(jid)
-        self.check_cancel(jid)
+        self.check_pause(jid)
         config = self.job_config(job)
         work = self.store.folder / "work" / jid
         work.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -204,14 +240,16 @@ class Worker:
         warnings = list(dict.fromkeys(doc.warnings + job.get("warnings", [])))
         track = next(t for t in info["tracks"] if t["id"] == job["track_id"])
         self.store.patch(jid, source_hash=digest, source_file=str(source), total=len(doc.segments), warnings=warnings,
-                         source_track={k: v for k, v in track.items() if k != "path"})
+                         source_track={k: v for k, v in track.items() if k != "path"}, source_stats=doc.stats)
         saved = self.store.translations(jid)
         fragments = self.store.fragments(jid)
         fragment_retry_ids = set(job.get('fragment_retry_ids', []))
         recovery_failures = {}
         translations = doc.resume_translations(saved)
         if len(saved) != len(translations):
-            warnings.append(f"{len(saved)-len(translations)} ancienne(s) traduction(s) d’effets lettre par lettre écartée(s) de l’export ; source conservée, checkpoints archivés.")
+            warnings.append(f"{len(saved)-len(translations)} ancienne(s) traduction(s) d’effets ASS écartée(s) de l’export ; source conservée, checkpoints archivés.")
+        self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(len(doc.segments), 1)))
+        self.check_pause(jid)
         pending = [s for s in doc.segments if s["id"] not in translations]
         total = len(doc.segments)
         # Old per-profile minima are deliberately retired. A difficult cue is
@@ -232,7 +270,8 @@ class Worker:
             subset = {key: record for key, record in fragments.items() if key in keys}
             modes = [cue['id'] for cue in batch if cue['id'] in fragment_retry_ids]
             options = {'fragment_checkpoints': subset, 'fragment_retry_ids': modes} if subset or modes else {}
-            return await providers.translate(config, batch, context, config.get("glossary", ""), **options)
+            return await providers.translate(config, batch, context, config.get("glossary", ""),
+                                             should_pause=lambda: self.pause_requested(jid), **options)
 
         def record_usage(result):
             usage = dict(self.store.job(jid).get("usage", {}))
@@ -264,7 +303,7 @@ class Worker:
         # Build each wave after feedback from the preceding wave. A precomputed
         # episode-wide batch list would ignore the model's recovered smaller size.
         while pending:
-            self.check_cancel(jid)
+            self.check_pause(jid)
             config = self.job_config(self.store.job(jid))
             limit = min(limit, config["batch_size"])
             self.store.patch(jid, status="translating", progress=5 + int(80 * len(translations) / max(total, 1)), done=len(translations))
@@ -321,6 +360,7 @@ class Worker:
                         limit = min(config["batch_size"], max(limit+1, (limit*3+1)//2))
                         streak = 0
                 self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 4, "size": limit})
+                self.check_pause(jid)
                 if failure:
                     raise failure
             except asyncio.CancelledError:
@@ -332,7 +372,7 @@ class Worker:
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
-        self.check_cancel(jid)
+        self.check_pause(jid)
         self.store.patch(jid, status="validating", progress=88)
         doc.validate_translations(translations, require_all=True)
         self.store.patch(jid, warnings=warnings)
@@ -341,9 +381,11 @@ class Worker:
             try:
                 proposal = await asyncio.to_thread(propose_sync, job["path"], source, info["duration"])
             except ValueError as exc:
+                self.check_pause(jid)
                 self.store.patch(jid, status="review", progress=90, sync_pending=True, sync_proposal=None,
                                  warnings=warnings + [str(exc)], timing_status="Correction automatique refusée ; timings source disponibles")
                 return
+            self.check_pause(jid)
             self.store.patch(jid, status="review", progress=90, sync_pending=True, sync_proposal=proposal,
                              warnings=warnings+proposal.get("warnings", []), timing_status="Correction proposée — validation requise")
             return
@@ -356,7 +398,7 @@ class Worker:
             raise ValueError("Timings invalides ou hors durée vidéo ; export refusé. " + warnings[0])
 
     async def finalize(self, jid: str, offset: int):
-        self.check_cancel(jid)
+        self.check_pause(jid)
         job = self.store.job(jid)
         source = Path(job["source_file"])
         if hashlib.sha256(source.read_bytes()).hexdigest() != job["source_hash"]:
@@ -371,7 +413,7 @@ class Worker:
         translations = doc.resume_translations(self.store.translations(jid))
         doc.validate_translations(translations, require_all=True)
         content = doc.render(translations, offset_ms=offset)
-        self.check_cancel(jid)
+        self.check_pause(jid)
         self.store.patch(jid, status="writing", progress=96)
         suffix = f".{target_code(config)}.{doc.format}"
         expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -395,7 +437,7 @@ class Worker:
         job = self.store.job(jid)
         if job["status"] in {"completed", "review"} and not job.get("sync_pending"):
             raise ValueError("Ce traitement est déjà terminé.")
-        result = self.store.patch(jid, cancel_requested=True, sync_pending=False, status="cancelled")
+        result = self.store.patch(jid, cancel_requested=True, pause_requested=False, sync_pending=False, status="cancelled")
         # API handlers run in FastAPI's thread pool; cancel on the owning loop.
         for task in self.inflight.get(jid, []):
             task.get_loop().call_soon_threadsafe(task.cancel)
@@ -403,11 +445,11 @@ class Worker:
 
     def resume(self, jid: str) -> dict:
         job = self.store.job(jid)
-        if self.active == jid or job["status"] not in {"error", "interrupted", "cancelled"}:
+        if self.active == jid or jid in self.inflight or job["status"] not in {"paused", "error", "interrupted", "cancelled"}:
             raise ValueError("Ce traitement ne peut pas être repris pour le moment.")
-        if any(j["id"] != jid and j["path"] == job["path"] and (j["status"] in ACTIVE or j.get("sync_pending")) for j in self.store.jobs()):
+        if any(j["id"] != jid and j["path"] == job["path"] and (j["status"] in RESERVED or j.get("sync_pending")) for j in self.store.jobs()):
             raise ValueError("Un autre traitement est déjà actif pour cet épisode.")
-        return self.store.patch(jid, status="queued", error=None, cancel_requested=False, sync_pending=False)
+        return self.store.patch(jid, status="queued", error=None, cancel_requested=False, pause_requested=False, sync_pending=False)
 
     async def delete(self, ids: list[str]) -> dict:
         if not 1 <= len(ids) <= 500 or len(set(ids)) != len(ids) or any(not re.fullmatch(r"[a-f0-9]{32}", jid) for jid in ids):
@@ -505,5 +547,5 @@ class Worker:
                 pass
         return {"format": doc.format, "cues": cues, "warnings": list(dict.fromkeys(job["warnings"] + doc.warnings)), "timing_status": job["timing_status"],
                 "source_track": track, "source_track_origin": track_origin,
-                "stats": {"events": len(doc.cues), "translatable": len(doc.segments), "preserved": len(doc.cues) - len(doc.segments)},
+                "stats": doc.stats,
                 "sync_pending": job.get("sync_pending", False), "sync_proposal": job.get("sync_proposal")}

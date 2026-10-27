@@ -151,7 +151,7 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
             track = next(t for t in info["tracks"] if t["id"] == data.track_id)
             return {"format": doc.format, "cues": doc.cues, "warnings": warnings,
                     "source_track": {k: v for k, v in track.items() if k != "path"}, "source_track_origin": "current",
-                    "stats": {"events": len(doc.cues), "translatable": len(doc.segments), "preserved": len(doc.cues) - len(doc.segments)},
+                    "stats": doc.stats,
                     "timing_status": "Timings source — audio non vérifié"}
 
     @app.get("/api/providers")
@@ -197,6 +197,10 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
     async def delete_jobs(data: DeleteJobsRequest):
         return await worker.delete(data.ids)
 
+    @app.post("/api/jobs/pause")
+    async def pause_jobs(data: DeleteJobsRequest):
+        return [public_job(j) for j in worker.pause_many(data.ids)]
+
     @app.post("/api/jobs/reconfigure")
     async def reconfigure_jobs(data: ReconfigureJobsRequest):
         return [public_job(j) for j in worker.reconfigure(data.ids, data.provider_id, data.restart)]
@@ -211,6 +215,10 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
     @app.post("/api/jobs/{jid}/cancel")
     async def cancel_job(jid: str):
         return public_job(worker.cancel(jid))
+
+    @app.post("/api/jobs/{jid}/pause")
+    async def pause_job(jid: str):
+        return public_job(worker.pause_many([jid])[0])
 
     @app.post("/api/jobs/{jid}/resume")
     async def resume_job(jid: str):
@@ -253,5 +261,5 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
 
 
 def public_job(job: dict) -> dict:
-    hidden = {"source_file", "source_hash", "config_fingerprint", "write_hash", "cancel_requested", "provider_snapshot", "batch_policy", "fragment_retry_ids"}
+    hidden = {"source_file", "source_hash", "config_fingerprint", "write_hash", "cancel_requested", "pause_requested", "provider_snapshot", "batch_policy", "fragment_retry_ids"}
     return {k: v for k,v in job.items() if k not in hidden}

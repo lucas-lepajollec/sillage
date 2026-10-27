@@ -2109,6 +2109,7 @@ main {
 .job-filters {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
 }
 .job-filters button {
@@ -2231,6 +2232,8 @@ main {
   border-color: color-mix(in srgb, var(--red) 30%, transparent);
   background: var(--red-soft);
 }
+.status-paused,
+.status-pausing,
 .status-queued,
 .status-cancelled,
 .status-interrupted {

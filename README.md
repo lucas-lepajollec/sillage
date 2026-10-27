@@ -26,7 +26,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 - Lazy folder navigation, breadcrumbs, recursive scans, filters and explicit per-episode source tracks; apply equivalent tracks to selected episodes, one folder or the whole scan with a checked match list.
 - Embedded and external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
 - Reasoning disabled when supported; required reasoning stays usable with explicit time/token warnings.
-- Paginated translation history with search/status filters and readable mobile form fields.
+- Paginated translation history with search/status filters, individual or scoped bulk pause/resume, and readable mobile form fields.
 - Folder-based translation history, free source reanalysis and confirmed cleanup of inactive entries/checkpoints while preserving media and exported subtitles.
 - Guided setup for OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Groq, Mistral, xAI, Ollama, LM Studio, vLLM, llama.cpp and compatible endpoints: live model discovery/search, manual fallback, multiple profiles and optional glossaries.
 - Strict cue IDs and protected formatting, neighboring context, bounded requests/retries and encrypted backend provider keys.

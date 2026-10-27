@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.11 — 2026-10-27
+
+- Pause an episode or the current folder/search/filter selection across pages, and resume paused work. Keep queued pauses durable across restarts; let current HTTP replies finish and checkpoint validated cues/fragments before stopping, without launching new generation or recovery calls. Keep cancellation separate and refuse pause once publication has begun.
+- Detect ASS animations baked into dense sequences of positioned/clipped, identical visible text frames. Preserve every original effect/event/timing instead of translating thousands of frame copies. Keep ordinary dialogue, sparse repeats and static layered signs eligible; archive older effect checkpoints without rendering them and reuse validated dialogue on resume.
+- Show the frame-effect count in jobs/previews, group repeated warnings, and wrap the status filters on mobile. Paused jobs retain duplicate-episode/provider guards; explicit profile adoption preserves their pause and confirmed history cleanup remains available.
+
 ## 0.0.10 — 2026-10-27
 
 - Stop repeating an array contract that a model persistently violates. Recover affected cues using stable explicit fragment IDs and a string-only response, across all thirteen adapters; restore exact source anchors locally and never infer missing boundaries.

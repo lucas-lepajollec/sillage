@@ -123,10 +123,10 @@ class Store:
             paths = set()
             for jid in changes:
                 job = records.get(jid)
-                if not job or job["status"] not in {"queued", "error", "interrupted", "cancelled"} or job.get("sync_pending"):
+                if not job or job["status"] not in {"queued", "paused", "error", "interrupted", "cancelled"} or job.get("sync_pending"):
                     raise ValueError("Adaptez uniquement des traitements en attente ou arrêtés.")
                 if job["path"] in paths or any(other["id"] not in changes and other["path"] == job["path"]
-                    and (other["status"] in {"queued", "extracting", "translating", "validating", "syncing", "writing"} or other.get("sync_pending")) for other in records.values()):
+                    and (other["status"] in {"queued", "paused", "pausing", "extracting", "translating", "validating", "syncing", "writing"} or other.get("sync_pending")) for other in records.values()):
                     raise ValueError("Un autre traitement est déjà actif pour cet épisode.")
                 paths.add(job["path"])
             for jid, patch in changes.items():
@@ -136,7 +136,7 @@ class Store:
                 db.execute("UPDATE jobs SET data=? WHERE id=?", (json.dumps(records[jid] | patch), jid))
 
     def delete_provider(self, pid: str):
-        if any(j["provider_id"] == pid and (j["status"] in {"queued", "extracting", "translating", "validating", "syncing", "writing"} or j.get("sync_pending")) for j in self.jobs()):
+        if any(j["provider_id"] == pid and (j["status"] in {"queued", "paused", "pausing", "extracting", "translating", "validating", "syncing", "writing"} or j.get("sync_pending")) for j in self.jobs()):
             raise ValueError("Ce provider est utilisé par un traitement actif.")
         with self.connect() as db:
             db.execute("DELETE FROM providers WHERE id=?", (pid,))
@@ -191,7 +191,7 @@ class Store:
                 row = db.execute("SELECT data FROM jobs WHERE id=?", (jid,)).fetchone()
                 if not row:
                     raise ValueError("Une traduction n’existe plus. Actualisez l’historique.")
-                if json.loads(row[0])["status"] not in {"completed", "review", "error", "cancelled", "interrupted"}:
+                if json.loads(row[0])["status"] not in {"paused", "completed", "review", "error", "cancelled", "interrupted"}:
                     raise ValueError("Annulez les traitements actifs avant de les supprimer.")
             db.executemany("DELETE FROM checkpoints WHERE job=?", [(jid,) for jid in ids])
             db.executemany("DELETE FROM fragment_checkpoints WHERE job=?", [(jid,) for jid in ids])

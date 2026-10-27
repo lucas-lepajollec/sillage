@@ -124,3 +124,51 @@ test.describe("touch form controls", () => {
     await page.screenshot({ path: "test-results/mobile-fields-landscape.png", fullPage: false });
   });
 });
+
+for (const mobile of [false, true]) {
+  test(`pause one episode and scoped queue across pages ${mobile ? "mobile" : "desktop"}`, async ({ page }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 });
+    let records = jobs().slice(0, 14).map((job, index): Job => ({ ...job, status: "queued", error: null, output: null,
+      path: `/test-only/${index < 12 ? "Group A" : "Group B"}/${job.name}`, done: 0, progress: 0 }));
+    const groups: string[][] = [];
+    const resumed: string[] = [];
+    await page.route("**/api/jobs", (route) => route.fulfill({ json: records }));
+    await page.route("**/api/jobs/*/pause", (route) => {
+      const id = route.request().url().split("/").at(-2)!;
+      records = records.map((job) => job.id === id ? { ...job, status: "pausing" } : job);
+      return route.fulfill({ json: records.find((job) => job.id === id) });
+    });
+    await page.route("**/api/jobs/pause", (route) => {
+      const ids: string[] = route.request().postDataJSON().ids;
+      groups.push(ids);
+      records = records.map((job) => ids.includes(job.id) ? { ...job, status: "paused" } : job);
+      return route.fulfill({ json: records.filter((job) => ids.includes(job.id)) });
+    });
+    await page.route("**/api/jobs/*/resume", (route) => {
+      const id = route.request().url().split("/").at(-2)!;
+      resumed.push(id);
+      records = records.map((job) => job.id === id ? { ...job, status: "queued" } : job);
+      return route.fulfill({ json: records.find((job) => job.id === id) });
+    });
+    await page.goto("/#traductions");
+    await page.getByRole("button", { name: "Liste", exact: true }).click();
+    await page.getByLabel("Traductions par page", { exact: true }).selectOption("5");
+    await page.getByLabel("Rechercher une traduction", { exact: true }).fill("Group A");
+    const first = page.locator('.job-card').first();
+    await first.getByRole("button", { name: "Pause", exact: true }).click();
+    await expect(first.getByText("Pause demandée", { exact: true })).toBeVisible();
+    await expect(first.getByRole("button", { name: "Reprendre", exact: true })).toHaveCount(0);
+    records = records.map((job) => job.status === 'pausing' ? { ...job, status: 'paused' } : job);
+    await expect(first.getByRole("button", { name: "Reprendre", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Mettre en pause (11)", exact: true }).click();
+    await expect.poll(() => groups.length).toBe(1);
+    expect(groups[0]).toHaveLength(11); // Includes episodes on pages two and three.
+    expect(records.filter((job) => job.path.includes('Group B')).every((job) => job.status === 'queued')).toBe(true);
+    await page.getByRole("button", { name: "Reprendre les pauses (12)", exact: true }).click();
+    await expect.poll(() => resumed.length).toBe(12);
+    expect(new Set(resumed).size).toBe(12);
+    await expect(first.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+    if (mobile) await readableFields(page);
+    await page.screenshot({ path: `test-results/translations-pause-${mobile ? "mobile" : "desktop"}.png`, fullPage: true });
+  });
+}
