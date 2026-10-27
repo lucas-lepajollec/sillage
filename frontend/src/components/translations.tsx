@@ -627,13 +627,13 @@ export function Translations({
         <p className="modal-body-copy">Les limites de lots, concurrence, délai et tentatives du profil s’appliquent automatiquement aux prochaines requêtes. Le modèle et les langues restent ceux du lancement. Cette action permet de choisir les paramètres actuels d’un profil pour la reprise.</p>
         {configure?.[0]?.translation_profile && <p className="modal-body-copy">Modèle au lancement : {configure[0].translation_profile.model} · {configure[0].translation_profile.source_language} → {configure[0].translation_profile.target_language}</p>}
         <label className="form-field">Profil pour la reprise
-          <select aria-label="Profil pour la reprise" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+          <select aria-label="Profil pour la reprise" disabled={reconfigure.isPending} value={profileId} onChange={(e) => setProfileId(e.target.value)}>
             {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.model}</option>)}
           </select>
         </label>
-        <label className="checkbox-label"><input type="radio" name="restart" checked={!restart} onChange={() => setRestart(false)} />Conserver les segments validés</label>
+        <label className="checkbox-label"><input type="radio" name="restart" disabled={reconfigure.isPending} checked={!restart} onChange={() => setRestart(false)} />Conserver les segments validés</label>
         <p className="modal-body-copy">Seules les répliques restantes seront traduites. Un changement de modèle ou de glossaire peut modifier le style ; vérifiez la cohérence. Pour les anciens traitements, les paramètres initiaux peuvent être inconnus. Si vous changez de langue, recommencez depuis le début.</p>
-        <label className="checkbox-label"><input type="radio" name="restart" checked={restart} onChange={() => setRestart(true)} />Recommencer la traduction</label>
+        <label className="checkbox-label"><input type="radio" name="restart" disabled={reconfigure.isPending} checked={restart} onChange={() => setRestart(true)} />Recommencer la traduction</label>
         {restart && <p className="modal-body-copy">Les segments validés de ces traitements seront effacés et retraduits, avec de nouveaux appels au fournisseur. Les fichiers média et exports restent conservés.</p>}
         {configure && configure.length > 1 && <p className="modal-body-copy">Le choix s’applique aux traitements en attente ou arrêtés du dossier, de la recherche et des filtres affichés, sur toutes les pages (500 maximum). Annulez d’abord un traitement déjà en cours.</p>}
         {reconfigure.isError && <ErrorNotice error={message(reconfigure.error)} />}
