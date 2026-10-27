@@ -32,6 +32,7 @@ import {
   retryStatuses,
   timingLabel,
   trackLabel,
+  warningGroups,
 } from "../lib";
 import type { Episode, Job, JobStatus, Provider, Reanalysis } from "../types";
 import { groupJobFolders, jobFolderLabel } from "../job-folders";
@@ -40,7 +41,7 @@ import { Button } from "./ui/button";
 import { Empty, ErrorNotice, Modal, Progress, Spinner, Status } from "./shared";
 import { PreviewDrawer } from "./preview";
 
-type JobFilter = "all" | "active" | "review" | "completed" | "error";
+type JobFilter = "all" | "active" | "paused" | "review" | "completed" | "error";
 const stages: JobStatus[] = [
   "queued",
   "extracting",
@@ -88,7 +89,7 @@ export function Translations({
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ["jobs"] });
       setConfigure(null);
-      notify(restart ? "Traduction remise en file depuis le début." : "Reprise demandée avec les paramètres choisis. Les segments validés sont conservés.");
+      notify("Paramètres mis à jour. Les pauses sont conservées." + (restart ? " Les segments ont été remis à zéro." : " Les segments validés sont conservés."));
     },
   });
   const openConfigure = (entries: Job[]) => {
@@ -123,7 +124,7 @@ export function Translations({
   });
   const requestDeletion = (entries: Job[]) => { deletion.reset(); setRemove(entries); };
   const mutation = useMutation({
-    mutationFn: ({ job, action }: { job: Job; action: "resume" | "cancel" }) =>
+    mutationFn: ({ job, action }: { job: Job; action: "pause" | "resume" | "cancel" }) =>
       api<Job>(`/jobs/${encodeURIComponent(job.id)}/${action}`, {}),
     onSuccess: (_, variables) => {
       void client.invalidateQueries({ queryKey: ["jobs"] });
@@ -131,9 +132,17 @@ export function Translations({
       notify(
         variables.action === "resume"
           ? "Reprise demandée depuis le dernier checkpoint."
-          : "Annulation demandée. Les segments validés sont conservés.",
+          : variables.action === "pause"
+            ? "Pause demandée. Les réponses en cours seront sauvegardées avant l’arrêt."
+            : "Annulation demandée. Les segments validés sont conservés.",
       );
     },
+    onError: (e) => notify(message(e), true),
+  });
+  const bulkPause = useMutation({
+    mutationFn: (entries: Job[]) => api<Job[]>("/jobs/pause", { ids: entries.map((job) => job.id) }),
+    onSettled: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: () => notify("Pause demandée pour la sélection. Les réponses en cours seront sauvegardées."),
     onError: (e) => notify(message(e), true),
   });
   const bulkRetry = useMutation({
@@ -151,17 +160,18 @@ export function Translations({
     },
     onSettled: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
     onSuccess: () =>
-      notify("Les épisodes en erreur ont été remis dans la file."),
+      notify("Les traitements sélectionnés ont été remis dans la file."),
     onError: (e) => notify(message(e), true),
   });
   const active = jobs.filter((j) => activeStatuses.includes(j.status));
+  const paused = jobs.filter((j) => j.status === "paused");
   const complete = jobs.filter((j) => j.status === "completed");
   const review = jobs.filter((j) => j.status === "review");
   const failed = jobs.filter((j) => j.status === "error");
   const processable = jobs.filter(
     (j) =>
       activeStatuses.includes(j.status) ||
-      ["completed", "review"].includes(j.status),
+      ["paused", "completed", "review"].includes(j.status),
   );
   const overall = processable.length
     ? processable.reduce((n, j) => n + j.progress, 0) / processable.length
@@ -182,6 +192,8 @@ export function Translations({
   const inactive = visible.filter((job) => !activeStatuses.includes(job.status)).slice(0, 500);
   const configurable = visible.filter((job) => ["queued", ...retryStatuses].includes(job.status) && !job.sync_pending).slice(0, 500);
   const scopedFailed = visible.filter((job) => job.status === "error");
+  const pausable = visible.filter((job) => activeStatuses.includes(job.status) && !["writing", "pausing"].includes(job.status)).slice(0, 500);
+  const scopedPaused = visible.filter((job) => job.status === "paused").slice(0, 500);
   const pageCount = Math.max(1, Math.ceil(totalItems / pageSize));
   const currentPage = Math.min(pageIndex, pageCount - 1);
   const pageJobs = showFolders ? [] : visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
@@ -318,6 +330,8 @@ export function Translations({
                 <strong>
                   {active.length
                     ? `${active.length} opération${active.length > 1 ? "s" : ""} en cours`
+                    : paused.length
+                      ? `${paused.length} traduction${paused.length > 1 ? "s" : ""} en pause`
                     : review.length
                       ? "Des résultats sont à vérifier"
                       : "La file est au repos"}
@@ -352,9 +366,16 @@ export function Translations({
               <Button variant={view === "list" ? "default" : "outline"} size="sm" aria-pressed={view === "list"}
                 onClick={() => { setView("list"); setFolder(null); setPageIndex(0); }}><List size={15} />Liste</Button>
             </div>
+            {pausable.length > 0 && <Button variant="outline" size="sm" disabled={bulkPause.isPending}
+              title="Dossier, recherche et filtres actuels, sur toutes les pages (500 maximum)."
+              onClick={() => bulkPause.mutate(pausable)}><Pause size={14} />Mettre en pause ({pausable.length})</Button>}
+            {scopedPaused.length > 0 && <Button variant="outline" size="sm" disabled={bulkRetry.isPending}
+              title="Reprendre les pauses dans le dossier, la recherche et les filtres actuels, sur toutes les pages."
+              onClick={() => bulkRetry.mutate(scopedPaused)}><Play size={14} />Reprendre les pauses ({scopedPaused.length})</Button>}
             {!showFolders && inactive.length > 0 && <Button variant="outline" size="sm" disabled={deletion.isPending}
               onClick={() => requestDeletion(inactive)}><Trash2 size={14} />Nettoyer l’historique ({inactive.length})</Button>}
           </div>
+          {(pausable.length > 0 || scopedPaused.length > 0) && <p className="modal-body-copy">Les actions groupées suivent le dossier, la recherche et les filtres actuels, sur toutes les pages (500 traitements maximum).</p>}
           {view === "folders" && <nav className="jobs-folder-navigation" aria-label="Dossiers des traductions">
             <Button variant="ghost" size="sm" onClick={() => { setFolder(null); setPageIndex(0); }}><FolderOpen size={14} />Tous les dossiers</Button>
             {folder !== null && <><ChevronRight size={13} /><strong>{jobFolderLabel(folder)}</strong><small>{folder}</small></>}
@@ -365,6 +386,7 @@ export function Translations({
                 [
                   { value: "all", label: "Tout", count: jobs.length },
                   { value: "active", label: "En cours", count: active.length },
+                  { value: "paused", label: "En pause", count: paused.length },
                   {
                     value: "review",
                     label: "À vérifier",
@@ -486,6 +508,7 @@ export function Translations({
                     <span>Piste source : {job.source_track ? trackLabel(job.source_track) : `${job.track_id} · libellé non enregistré`}</span>
                   </div>
                   {job.translation_profile && <div className="job-source-track"><Settings2 size={13} /><span>{job.translation_profile.model} · {job.translation_profile.source_language} → {job.translation_profile.target_language}</span></div>}
+                  {!!job.source_stats?.frame_animation && <div className="job-source-track"><ShieldCheck size={13} /><span>{job.source_stats.frame_animation} effets ASS image par image conservés à l’identique, exclus des appels IA.</span></div>}
                   <div className="job-stages">
                     {jobStages.map((stage, i) => (
                       <span
@@ -521,11 +544,13 @@ export function Translations({
                         {job.warnings.length} avertissement
                         {job.warnings.length > 1 ? "s" : ""}
                       </summary>
-                      {job.warnings.map((warning, i) => (
-                        <p key={i}>{warning}</p>
+                      {warningGroups(job.warnings).map(({ message, count }) => (
+                        <p key={message}>{count > 1 ? `${count} événements · ` : ""}{message}</p>
                       ))}
                     </details>
                   )}
+                  {job.status === "pausing" && <p className="modal-body-copy">Pause demandée : sauvegarde des réponses en cours. Aucune nouvelle requête de traduction ou de réparation ne sera lancée.</p>}
+                  {job.status === "paused" && <p className="modal-body-copy">En pause. Les segments validés sont conservés ; reprenez quand vous le souhaitez.</p>}
                   <div className="job-card-footer">
                     <span>
                       {job.total
@@ -549,7 +574,7 @@ export function Translations({
                         disabled={reanalyze.isPending} onClick={() => reanalyze.mutate(job)}>
                         {reanalyze.isPending && reanalyze.variables?.id === job.id ? <Loader2 className="spin" size={14} /> : <ScanLine size={14} />}Réanalyser
                       </Button>
-                      {job.status !== "queued" && (
+                      {job.status !== "queued" && (job.status !== "paused" || job.total > 0) && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -572,6 +597,10 @@ export function Translations({
                           Annuler
                         </Button>
                       )}
+                      {isActive && !["writing", "pausing"].includes(job.status) && <Button variant="outline" size="sm"
+                        disabled={mutation.isPending} onClick={() => mutation.mutate({ job, action: "pause" })}>
+                        <Pause size={14} />Pause
+                      </Button>}
                       {["queued", ...retryStatuses].includes(job.status) && !job.sync_pending && (
                         <Button variant="ghost" size="sm" aria-label={`Adapter les paramètres de ${job.name}`}
                           disabled={!providers.length} onClick={() => openConfigure([job])}><Settings2 size={14} />Paramètres</Button>

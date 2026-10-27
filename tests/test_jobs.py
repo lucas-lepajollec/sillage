@@ -11,7 +11,7 @@ from sillage.storage import Store
 from sillage.subtitles import SubtitleDocument
 
 
-async def deterministic(config, segments, context, glossary=""):
+async def deterministic(config, segments, context, glossary="", **kwargs):
     translations = {}
     for segment in segments:
         text = segment["text"]
@@ -159,7 +159,7 @@ async def test_recorded_source_metadata_is_stable_when_container_labels_change(v
 async def test_missing_llm_segment_is_never_published(video, tmp_path):
     store, worker, request = environment(video, tmp_path, batch=2)
     job = (await worker.create(request))[0]
-    async def missing(*args):
+    async def missing(*args, **kwargs):
         return {"translations": {}, "warnings": [], "usage": {}}
     with patch("sillage.jobs.providers.translate", side_effect=missing), pytest.raises(ValueError, match="incomplète"):
         await worker.process(job["id"])
@@ -170,7 +170,7 @@ async def test_interruption_resumes_without_retranslating_validated_batch(video,
     store, worker, request = environment(video, tmp_path)
     job = (await worker.create(request))[0]
     calls = []
-    async def interrupted(config, segments, context, glossary):
+    async def interrupted(config, segments, context, glossary, **kwargs):
         calls.append(segments[0]["id"])
         if len(calls) == 2:
             raise ValueError("Test interruption")
@@ -191,7 +191,7 @@ async def test_interruption_resumes_without_retranslating_validated_batch(video,
 async def test_cancel_between_batches_keeps_checkpoint(video, tmp_path):
     store, worker, request = environment(video, tmp_path)
     job = (await worker.create(request))[0]
-    async def cancelling(*args):
+    async def cancelling(*args, **kwargs):
         result = await deterministic(*args)
         worker.cancel(job["id"])
         return result
@@ -286,7 +286,7 @@ async def test_profile_model_edit_does_not_change_a_queued_jobs_model_or_export_
     job = (await worker.create(request))[0]
     store.save_provider(store.provider(job["provider_id"]) | {"model": "different", "target_language": "de"})
     models = []
-    async def adapter(config, *args):
+    async def adapter(config, *args, **kwargs):
         models.append((config["model"], config["target_language"]))
         return await deterministic(config, *args)
     with patch("sillage.jobs.providers.translate", side_effect=adapter):
@@ -326,7 +326,7 @@ async def test_configured_batch_concurrency_is_bounded(video, tmp_path):
     store.save_provider(provider | {"concurrency": 2})
     job = (await worker.create(request))[0]
     active, maximum = 0, 0
-    async def simultaneous(*args):
+    async def simultaneous(*args, **kwargs):
         nonlocal active, maximum
         active += 1
         maximum = max(maximum, active)
@@ -374,8 +374,8 @@ async def test_adaptive_feedback_changes_next_wave_and_survives_resume_and_next_
         items = [{'id': cue['id'], 'text': cue['text'].replace('Hello', 'Bonjour')} for cue in batch] if good else []
         return httpx.Response(200, json=envelope(text=output(items)))
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        async def adapter(config, batch, context, glossary):
-            return await original_translate(config, batch, context, glossary, client=client)
+        async def adapter(config, batch, context, glossary, **kwargs):
+            return await original_translate(config, batch, context, glossary, client=client, **kwargs)
         with patch('sillage.jobs.providers.translate', side_effect=adapter), pytest.raises(providers.StructuredOutputError):
             await worker.process(job['id'])
         assert len(store.translations(job['id'])) == 4  # Earlier valid cues survive the failing wave.
@@ -442,7 +442,7 @@ async def test_recovered_size_is_used_by_next_wave_without_restarting(video, tmp
     request['items'][0]['track_id'] = f'external:{source.name}'
     job = (await worker.create(request))[0]
     sizes = []
-    async def recovered(*args):
+    async def recovered(*args, **kwargs):
         sizes.append(len(args[1]))
         return (await deterministic(*args)) | {'recovered': len(args[1]) > 1, 'batch_size': 1}
     with patch('sillage.jobs.providers.translate', side_effect=recovered):
@@ -472,7 +472,7 @@ async def test_user_cancellation_stops_inflight_recovery_and_queue_continues(vid
     track = worker.library.inspect(other)['tracks'][0]['id']
     entered = asyncio.Event()
     calls = 0
-    async def waiting(*args):
+    async def waiting(*args, **kwargs):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -501,7 +501,7 @@ async def test_reasoning_warning_survives_resume_after_all_cues_were_checkpointe
     from sillage.reasoning import MANDATORY
     store, worker, request = environment(video, tmp_path)
     job = (await worker.create(request))[0]
-    async def translate_with_warning(*args):
+    async def translate_with_warning(*args, **kwargs):
         result = await deterministic(*args)
         return result | {'warnings': [MANDATORY]}
     with patch('sillage.jobs.providers.translate', side_effect=translate_with_warning), patch.object(worker, 'finalize', side_effect=ValueError('interrupted before publication')):
@@ -662,7 +662,7 @@ async def test_runtime_limits_apply_to_next_wave_without_losing_checkpoint(video
     store, worker, request = environment(video, tmp_path)
     job = (await worker.create(request))[0]
     seen = []
-    async def adapter(config, *args):
+    async def adapter(config, *args, **kwargs):
         seen.append((config['concurrency'], config['timeout'], config['retries']))
         store.save_provider(store.provider(job['provider_id']) | {'concurrency': 3, 'timeout': 240, 'retries': 4})
         return await deterministic(config, *args)
@@ -679,7 +679,7 @@ async def test_partial_failed_batch_and_completed_concurrent_sibling_are_saved(v
     store, worker, request = environment(video, tmp_path)
     store.save_provider(store.provider(request['provider_id']) | {'concurrency': 2})
     job = (await worker.create(request))[0]
-    async def adapter(config, segments, *args):
+    async def adapter(config, segments, *args, **kwargs):
         if segments[0]['id'] == 'e000001':
             error = StructuredOutputError('Synthetic bad cue', 1, {}, 1)
             raise error
@@ -708,7 +708,7 @@ async def test_reconfigure_keeps_checkpoints_and_can_recover_unknown_legacy_sett
     assert store.job(job['id'])['status'] == 'queued'
     assert any('cohérence' in warning for warning in store.job(job['id'])['warnings'])
     seen = []
-    async def adapter(config, batch, *args):
+    async def adapter(config, batch, *args, **kwargs):
         seen.extend(cue['id'] for cue in batch)
         return await deterministic(config, batch, *args)
     with patch('sillage.jobs.providers.translate', side_effect=adapter):
@@ -769,7 +769,7 @@ async def test_valid_single_cues_grow_back_and_do_not_poison_the_next_episode(vi
     job = (await worker.create(request))[0]
     store.patch(job['id'], adaptive_batch_size=1, batch_policy={'version': policy, 'size': 1})
     sizes = []
-    async def adapter(config, batch, *args):
+    async def adapter(config, batch, *args, **kwargs):
         sizes.append(len(batch))
         return await deterministic(config, batch, *args)
     with patch('sillage.jobs.providers.translate', side_effect=adapter):
@@ -810,8 +810,8 @@ async def test_real_partial_json_failure_checkpoints_valid_cues_and_resume_reque
         return httpx.Response(200, json=envelope(text=output(items)))
     original = providers.translate
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        async def adapter(config, *args):
-            return await original(config, *args, client=client)
+        async def adapter(config, *args, **kwargs):
+            return await original(config, *args, client=client, **kwargs)
         with patch('sillage.jobs.providers.translate', side_effect=adapter), pytest.raises(providers.StructuredOutputError):
             await worker.process(job['id'])
         assert set(store.translations(job['id'])) == {'e000001'}

@@ -1,5 +1,6 @@
 """Test-only deterministic HTTP endpoint used by docker_smoke.py."""
 import json
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class Handler(BaseHTTPRequestHandler):
@@ -22,6 +23,8 @@ class Handler(BaseHTTPRequestHandler):
         segments = json.loads(data["messages"][-1]["content"])["segments"]
         with open('/tmp/sillage-test-provider-requests.jsonl', 'a') as log:
             log.write(json.dumps({'model': data.get('model'), 'ids': [cue['id'] for cue in segments]}) + '\n')
+        if data.get('model') == 'pause-test':
+            time.sleep(.8)
         result = []
         for segment in segments:
             spans = segment['text'] if isinstance(segment['text'], list) else [segment['text']]

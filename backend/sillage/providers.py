@@ -12,7 +12,7 @@ import json
 import re
 import unicodedata
 from collections import Counter
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -93,6 +93,10 @@ class ProviderError(ValueError):
         self.fragment_retry_ids: list[str] = []
         self.failures: dict[str, str] = {}
         self.invalidated_fragments: list[str] = []
+
+
+class ProviderPaused(ProviderError):
+    """Cooperative stop: keep validated work and launch no further generation."""
 
 
 class StructuredOutputError(ProviderError):
@@ -598,7 +602,8 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                     context: list[dict[str, Any]] | None = None, glossary: str = "", *,
                     client: httpx.AsyncClient | None = None,
                     fragment_checkpoints: dict[str, dict[str, str]] | None = None,
-                    fragment_retry_ids: list[str] | None = None) -> dict[str, Any]:
+                    fragment_retry_ids: list[str] | None = None,
+                    should_pause: Callable[[], bool] | None = None) -> dict[str, Any]:
     """Adapt structural failures down to single cues within one shared call budget.
 
     Each cue validates independently. Failures carry only validated checkpoints.
@@ -703,6 +708,8 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
         error = "Le fournisseur a renvoyé une traduction JSON invalide ou incomplète."
         use_fragments = False
         for attempt in range(settings.retries + 1):
+            if should_pause and should_pause():
+                raise ProviderPaused("Pause demandée. Les réponses validées sont conservées.")
             if requests >= call_limit:
                 raise failure("La limite de requêtes de récupération automatique a été atteinte.", batch)
             requests += 1

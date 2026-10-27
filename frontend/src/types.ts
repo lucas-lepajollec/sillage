@@ -45,7 +45,7 @@ export type Preview = {
   format: string;
   source_track?: Track | null;
   source_track_origin?: "recorded" | "current" | "unavailable";
-  stats?: { events: number; translatable: number; preserved: number };
+  stats?: { events: number; translatable: number; preserved: number; frame_animation?: number };
   cues: Cue[];
   warnings: string[];
   timing_status: string;
@@ -93,6 +93,8 @@ export type Provider = {
 };
 export type JobStatus =
   | "queued"
+  | "pausing"
+  | "paused"
   | "extracting"
   | "translating"
   | "validating"
@@ -110,6 +112,7 @@ export type Job = {
   name: string;
   track_id: string;
   source_track?: Track;
+  source_stats?: Preview["stats"];
   provider_id: string;
   translation_profile?: Pick<Provider, "name" | "kind" | "model" | "source_language" | "target_language">;
   status: JobStatus;

@@ -161,6 +161,8 @@ ANIMATION = re.compile(r"\\(?:t\s*\(|move\s*\(|[kK](?:f|o|t)?\s*[0-9])")
 # translation with different letters; retain the source as an unsupported effect.
 GLYPH_BOUNDARY = re.compile(r"(?<=[^\W\d_])(?:\{[^{}\r\n]*\})+(?=[^\W\d_])")
 GLYPH_WARNING = "Mise en forme ASS lettre par lettre conservée sans traduction."
+FRAME_WARNING = "Animation ASS découpée image par image conservée sans traduction."
+POSITIONED = re.compile(r"\\(?:pos|clip|iclip)\s*\(")
 MAX_FILE = 30_000_000
 
 
@@ -178,6 +180,7 @@ class _Event:
     translatable: bool = False
     comment: bool = False
     glyph_styling: bool = False
+    frame_animation: bool = False
 
 
 def _milliseconds(value: str, format_: str) -> int:
@@ -249,9 +252,15 @@ class SubtitleDocument:
         self._validate_parser(text)
         for event in self._events:
             self._prepare(event)
+        self._classify_frame_animation()
         self.segments = [{"id": e.id, "text": e.protected} for e in self._events if e.translatable]
         self.cues = [{"id": e.id, "start": e.start, "end": e.end, "text": e.text,
                       **({"warning": e.warning} if e.warning else {})} for e in self._events]
+        self.stats = {"events": len(self.cues), "translatable": len(self.segments),
+                      "preserved": len(self.cues) - len(self.segments)}
+        frames = sum(event.frame_animation for event in self._events)
+        if frames:
+            self.stats["frame_animation"] = frames
 
     @classmethod
     def load(cls, path: str | Path, encoding: str | None = None) -> "SubtitleDocument":
@@ -393,6 +402,40 @@ class SubtitleDocument:
         except Exception:
             raise ValueError("Sous-titres refusés : la validation pysubs2 détecte une structure ou des timings incohérents.") from None
 
+    def _classify_frame_animation(self):
+        """Recognize dense positioned frame sequences, never ordinary repeats.
+
+        Some fansubs bake animation into thousands of static events instead of
+        using \\t/\\move. Keep every original event, timing and drawing intact.
+        Require identical visible text, short frames, temporal continuity and
+        many distinct start times; static layered signs alone do not qualify.
+        """
+        if self.format not in {"ass", "ssa"}:
+            return
+        groups: dict[str, list[_Event]] = {}
+        for event in self._events:
+            if event.translatable and 0 < event.end - event.start <= 120 and POSITIONED.search(event.text):
+                visible = PLACEHOLDER.sub("", event.protected)
+                groups.setdefault(visible, []).append(event)
+
+        def protect(run):
+            if len(run) >= 16 and len({event.start for event in run}) >= 8:
+                for event in run:
+                    event.frame_animation = True
+                    event.translatable = False
+                    event.warning = FRAME_WARNING
+                    self.warnings.append(f"{event.id} : {FRAME_WARNING}")
+
+        for events in groups.values():
+            run, end = [], -1
+            for event in sorted(events, key=lambda e: e.start):
+                if event.start > end + 100:
+                    protect(run)
+                    run = []
+                run.append(event)
+                end = max(end, event.end) if len(run) > 1 else event.end
+            protect(run)
+
     def validate_translations(self, translations: Mapping[str, str], require_all: bool = False) -> None:
         if not isinstance(translations, Mapping):
             raise ValueError("Traductions invalides : dictionnaire requis.")
@@ -419,12 +462,12 @@ class SubtitleDocument:
                 raise ValueError(f"{id_} : traduction sans texte visible.")
 
     def resume_translations(self, checkpoints: Mapping[str, str]) -> dict[str, str]:
-        """Ignore only known, newly protected glyph effects from older jobs.
+        """Ignore only known, newly protected glyph/frame effects from older jobs.
 
         Their old checkpoint rows remain stored. Never render those translations,
         infer replacements, or silently accept unknown/protected IDs of other kinds.
         """
-        protected = {event.id for event in self._events if event.glyph_styling}
+        protected = {event.id for event in self._events if event.glyph_styling or event.frame_animation}
         active = {key: value for key, value in checkpoints.items() if key not in protected}
         self.validate_translations(active)
         return active

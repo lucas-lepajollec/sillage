@@ -109,6 +109,51 @@ def main():
                 assert deletion.json() == {"deleted": [jobs[0]["id"]], "warnings": []}
                 assert len(client.get("/api/jobs").json()) == 1
                 docker("exec", name, "python", "-c", "from pathlib import Path; import sys; assert Path(sys.argv[1]).is_file()", jobs[0]["output"])
+                # Pause real HTTP calls, save both in-flight replies, then resume
+                # only the remaining generated cues through the public API.
+                pause_video = next(media.rglob("*.mkv")).with_name("Pause fixture.mkv")
+                shutil.copyfile(next(media.rglob("*.mkv")), pause_video)
+                original[pause_video.name] = hashlib.sha256(pause_video.read_bytes()).hexdigest()
+                pause_source = pause_video.with_suffix('.en.srt')
+                pause_source.write_text(''.join(f'{i}\n00:00:00,500 --> 00:00:02,000\nHello world!\n\n' for i in range(1,5)))
+                pause_hash = hashlib.sha256(pause_source.read_bytes()).hexdigest()
+                pause_profile = client.post('/api/providers', json=provider | {'id': None, 'name': 'Pause test', 'model': 'pause-test', 'batch_size': 1, 'concurrency': 2}).json()
+                pause_path = '/media/' + pause_video.relative_to(media).as_posix()
+                response = client.post('/api/jobs', json={'provider_id': pause_profile['id'], 'items': [{'path': pause_path, 'track_id': 'external:' + pause_source.name}]})
+                response.raise_for_status()
+                pause_id = response.json()[0]['id']
+                for _ in range(100):
+                    state = next(j for j in client.get('/api/jobs').json() if j['id'] == pause_id)
+                    if state['status'] == 'translating':
+                        break
+                    time.sleep(.02)
+                for _ in range(30):
+                    started = int(docker('exec', name, 'python', '-c', "import json; from pathlib import Path; print(sum(r['model'] == 'pause-test' for r in map(json.loads, Path('/tmp/sillage-test-provider-requests.jsonl').read_text().splitlines())))"))
+                    if started:
+                        break
+                    time.sleep(.02)
+                assert started
+                response = client.post(f'/api/jobs/{pause_id}/pause', json={})
+                response.raise_for_status()
+                assert response.json()['status'] == 'pausing'
+                for _ in range(100):
+                    state = next(j for j in client.get('/api/jobs').json() if j['id'] == pause_id)
+                    if state['status'] == 'paused':
+                        break
+                    time.sleep(.05)
+                assert state['status'] == 'paused' and state['done'] == 2 and not state['output'], state
+                before_resume = state['done']
+                response = client.post(f'/api/jobs/{pause_id}/resume', json={})
+                response.raise_for_status()
+                for _ in range(100):
+                    state = next(j for j in client.get('/api/jobs').json() if j['id'] == pause_id)
+                    if state['status'] in {'completed', 'review', 'error'}:
+                        break
+                    time.sleep(.1)
+                assert state['done'] == state['total'] == 4 and state['output'], state
+                assert hashlib.sha256(pause_source.read_bytes()).hexdigest() == pause_hash
+                calls = json.loads(docker('exec', name, 'python', '-c', "import json; from pathlib import Path; print(json.dumps([r['ids'] for r in map(json.loads, Path('/tmp/sillage-test-provider-requests.jsonl').read_text().splitlines()) if r['model'] == 'pause-test']))"))
+                assert sorted(cue for batch in calls for cue in batch) == [f'e{i:06}' for i in range(1,5)], (before_resume, calls)
                 # Real partial JSON failure, profile edit and in-place adoption.
                 # Generated copy only: no operator media or provider is involved.
                 recovery_source = next(media.rglob("*.mkv"))
@@ -122,7 +167,8 @@ def main():
                 glyph_line = 'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,' + gradient + '\n'
                 comment = 'Comment: 0,0:00:05.00,0:00:08.00,Default,,0,0,0,,Fictional editor note\n'
                 sidecar = recovery_video.with_suffix('.en.ass')
-                sidecar.write_text(ASS + glyph_line + comment)
+                frame_lines = ''.join(f'Dialogue: 0,0:00:01.{i*4:02},0:00:01.{i*4+4:02},Sign,,0,0,0,,{{\\pos({100+i},120)\\blur1}}Station\n' for i in range(20))
+                sidecar.write_text(ASS + glyph_line + comment + frame_lines)
                 sidecar_hash = hashlib.sha256(sidecar.read_bytes()).hexdigest()
                 broken = client.post("/api/providers", json=provider | {"id": None, "model": "fragment-test", "retries": 1, "batch_size": 4}).json()
                 path = "/media/" + recovery_video.relative_to(media).as_posix()
@@ -136,6 +182,8 @@ def main():
                     time.sleep(0.2)
                 assert recovery_job["status"] == "error" and recovery_job["done"] > 0, recovery_job
                 assert recovery_job["done"] < recovery_job["total"]
+                assert recovery_job['source_stats']['frame_animation'] == 20
+                assert recovery_job['total'] == 2
                 assert recovery_job['diagnostics']['fragment_fallback'] == 1
                 assert 'fragment_retry_ids' not in recovery_job and 'fragment_checkpoints' not in recovery_job
                 before_calls = int(docker('exec', name, 'python', '-c', "from pathlib import Path; print(len(Path('/tmp/sillage-test-provider-requests.jsonl').read_text().splitlines()))"))
@@ -156,7 +204,7 @@ def main():
                     "import json,sys; from pathlib import Path; print(json.dumps([json.loads(line) for line in Path('/tmp/sillage-test-provider-requests.jsonl').read_text().splitlines()][int(sys.argv[1]):]))", str(before_calls)))
                 assert remaining_calls == [{'model': 'deterministic', 'ids': ['e000001.s0002']}], remaining_calls
                 recovered_content = client.get(f"/api/jobs/{recovery_id}/download").text
-                assert 'Bonjour' in recovered_content and glyph_line in recovered_content and comment in recovered_content
+                assert 'Bonjour' in recovered_content and glyph_line in recovered_content and comment in recovered_content and frame_lines in recovered_content
                 assert recovered_job['total'] == 2  # Only normal dialogue is translated.
                 assert any('lettre par lettre' in warning for warning in recovered_job['warnings'])
                 assert hashlib.sha256(sidecar.read_bytes()).hexdigest() == sidecar_hash
@@ -164,7 +212,7 @@ def main():
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, persistent array failures/partial fragment checkpoints/one-missing-span recovery, preserved glyph effects and late comments, source hashes, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, cooperative HTTP pause/resume, persistent array failures/partial fragment checkpoints/one-missing-span recovery, preserved frame/glyph effects and late comments, source hashes, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 
