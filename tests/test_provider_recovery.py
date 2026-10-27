@@ -215,7 +215,7 @@ def test_recovery_call_budget_is_shared_by_all_descendants():
         attempts[key] = attempts.get(key, 0) + (len(batch) == 1)
         good = len(batch) == 1 and attempts[key] >= 6
         return httpx.Response(200, json=envelope(text=output(translated(batch) if good else [])))
-    with pytest.raises(StructuredOutputError, match='limite de récupération') as error:
+    with pytest.raises(StructuredOutputError, match='limite de requêtes') as error:
         invoke(handler, settings=config(retries=5), segments=cues(32))
     assert len(calls) == error.value.requests == 64
     assert error.value.usage['total_tokens'] == 64 * 15
@@ -280,7 +280,7 @@ def test_moved_boundary_tokens_are_recovered_before_worker_validation():
                 item['text'] = 'Bonjour __SILLAGE_0000__Texte.__SILLAGE_0001__'
         return httpx.Response(200, json=envelope(text=output(items)))
     result = invoke(handler, settings=config(retries=1), segments=cues())
-    assert result['batch_size'] == 1 and len(result['translations']) == 4
+    assert result['batch_size'] == 4 and len(result['translations']) == 4
     assert all(text.startswith('__SILLAGE_0000__') for text in result['translations'].values())
 
 
@@ -305,7 +305,7 @@ def test_only_invalid_cue_is_retried_without_lowering_the_whole_batch_to_one():
             items[2]['text'] = ['Bonjour', 'fragment ajouté']
         return httpx.Response(200, json=envelope(text=output(items)))
     result = invoke(handler, settings=config(retries=1), segments=cues())
-    assert calls == [['cue-0', 'cue-1', 'cue-2', 'cue-3'], ['cue-2']]
+    assert calls == [['cue-0', 'cue-1', 'cue-2', 'cue-3'], ['cue-2.s0000']]
     assert result['batch_size'] == 4
     assert result['translations'] == {item['id']: item['text'] for item in translated(cues())}
 

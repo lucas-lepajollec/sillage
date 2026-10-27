@@ -38,6 +38,8 @@ Les événements de durée nulle sont conservés sans traduction et signalés po
 
 ## Lots et paramètres de reprise
 
+Depuis0.0.10, une réponse qui échoue sur les fragments bascule vers des identifiants explicites avec une chaîne par fragment. Les morceaux validés et ce mode sont conservés pour reprendre uniquement les manquants, sans publier une réplique incomplète. Une nouvelle table SQLite est créée automatiquement ; recommencer ou supprimer l’historique efface aussi ces fragments.
+
 Les lots réduits peuvent remonter après trois vagues complètes réussies ; un événement difficile ne fixe plus un minimum à tous les épisodes suivants. Seules les répliques à identifiant explicite et individuellement validées sont conservées d’une réponse JSON complète. Une réponse tronquée, un identifiant inconnu ou un contenu hors JSON n’est jamais réparé par déduction. Un modèle qui échoue encore sur une seule réplique peut toujours nécessiter une intervention ; aucune garantie de réussite universelle n’est revendiquée.
 
 Le modèle et les langues restent attachés au traitement via un instantané chiffré, tandis que les limites d’exécution du profil s’appliquent à la prochaine vague. « Adapter les paramètres » permet une reprise en place, individuelle ou groupée, avec conservation des segments validés ou remise à zéro explicite. Conserver des segments après changement de modèle peut mélanger les styles ; un changement de langue connu exige de recommencer. Pour un ancien traitement dont le profil avait déjà changé avant la mise à jour, les paramètres initiaux ne sont pas reconstructibles : vérifiez les langues avant de confirmer la conservation. Ni les MKV ni les exports présents ne sont écrasés.

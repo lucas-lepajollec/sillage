@@ -253,5 +253,5 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
 
 
 def public_job(job: dict) -> dict:
-    hidden = {"source_file", "source_hash", "config_fingerprint", "write_hash", "cancel_requested", "provider_snapshot", "batch_policy"}
+    hidden = {"source_file", "source_hash", "config_fingerprint", "write_hash", "cancel_requested", "provider_snapshot", "batch_policy", "fragment_retry_ids"}
     return {k: v for k,v in job.items() if k not in hidden}

@@ -143,7 +143,7 @@ class Worker:
                 self.store.patch(job["id"], translation_profile=self.profile_label(saved))
         else:
             saved = self.store.provider(job["provider_id"], secrets=True)
-            if fingerprint(saved) != job["config_fingerprint"] and self.store.translations(job["id"]):
+            if fingerprint(saved) != job["config_fingerprint"] and (self.store.translations(job["id"]) or self.store.fragments(job["id"])):
                 raise ValueError("Les anciens paramètres ne sont pas enregistrés. Utilisez Adapter les paramètres dans Traductions pour reprendre sans réanalyser les fichiers.")
             self.store.patch(job["id"], provider_snapshot=self.store.seal_config(saved),
                              translation_profile=self.profile_label(saved), config_fingerprint=fingerprint(saved))
@@ -167,7 +167,7 @@ class Worker:
         for jid in ids:
             job = self.store.job(jid)
             known = self.store.open_config(job["provider_snapshot"]) if job.get("provider_snapshot") else None
-            translated = self.store.translations(jid)
+            translated = self.store.translations(jid) or self.store.fragments(jid)
             if translated and not restart and known and (target_code(known) != code or known["source_language"].casefold() != config["source_language"].casefold()):
                 raise ValueError("Les langues ont changé. Choisissez Recommencer la traduction pour éviter de mélanger les langues.")
             path = self.library.resolve(job["path"])
@@ -184,7 +184,7 @@ class Worker:
                             "sync_proposal": None, "write_hash": None, "batch_policy": {},
                             "adaptive_batch_size": providers.initial_batch_size(config), "warnings": [] if restart else warnings}
             if restart:
-                changes[jid].update(done=0, progress=0, usage={}, diagnostics={})
+                changes[jid].update(done=0, progress=0, usage={}, diagnostics={}, fragment_retry_ids=[], translation_failures={})
         self.store.reconfigure_jobs(changes, restart)
         return [self.store.job(jid) for jid in ids]
 
@@ -206,6 +206,9 @@ class Worker:
         self.store.patch(jid, source_hash=digest, source_file=str(source), total=len(doc.segments), warnings=warnings,
                          source_track={k: v for k, v in track.items() if k != "path"})
         saved = self.store.translations(jid)
+        fragments = self.store.fragments(jid)
+        fragment_retry_ids = set(job.get('fragment_retry_ids', []))
+        recovery_failures = {}
         translations = doc.resume_translations(saved)
         if len(saved) != len(translations):
             warnings.append(f"{len(saved)-len(translations)} ancienne(s) traduction(s) d’effets lettre par lettre écartée(s) de l’export ; source conservée, checkpoints archivés.")
@@ -215,16 +218,21 @@ class Worker:
         # evidence about that cue, not every episode/model request forever.
         initial = providers.initial_batch_size(config)
         state = job.get("batch_policy", {})
-        limit = min(config["batch_size"], max(1, state.get("size", initial))) if state.get("version") == 3 else initial
+        limit = min(config["batch_size"], max(1, state.get("size", initial))) if state.get("version") == 4 else initial
         streak = 0
-        self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 3, "size": limit})
+        self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 4, "size": limit})
         positions = {segment["id"]: index for index, segment in enumerate(doc.segments)}
 
         async def translate_batch(batch):
             first, last = positions[batch[0]["id"]], positions[batch[-1]["id"]]
             context = doc.segments[max(0, first-3):first] + doc.segments[last+1:last+4]
             context = [cue | ({"translated": translations[cue["id"]]} if cue["id"] in translations else {}) for cue in context]
-            return await providers.translate(config, batch, context, config.get("glossary", ""))
+            wire, _ = providers.fragment_plan(batch)
+            keys = {cue['id'] for cue in wire}
+            subset = {key: record for key, record in fragments.items() if key in keys}
+            modes = [cue['id'] for cue in batch if cue['id'] in fragment_retry_ids]
+            options = {'fragment_checkpoints': subset, 'fragment_retry_ids': modes} if subset or modes else {}
+            return await providers.translate(config, batch, context, config.get("glossary", ""), **options)
 
         def record_usage(result):
             usage = dict(self.store.job(jid).get("usage", {}))
@@ -239,6 +247,19 @@ class Worker:
                 if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                     diagnostics[key] = diagnostics.get(key, 0) + value
             self.store.patch(jid, diagnostics=diagnostics)
+
+        def record_recovery(result):
+            for key in result.get('invalidated_fragments', []):
+                fragments.pop(key, None)
+            fragments.update(result.get('fragment_checkpoints', {}))
+            fragment_retry_ids.update(result.get('fragment_retry_ids', []))
+            recovery_failures.update(result.get('failures', {}))
+            for cue_id in result.get('translations', {}):
+                recovery_failures.pop(cue_id, None)
+                wire, _ = providers.fragment_plan([doc.segments[positions[cue_id]]])
+                for cue in wire:
+                    recovery_failures.pop(cue['id'], None)
+            self.store.patch(jid, fragment_retry_ids=sorted(fragment_retry_ids), translation_failures=dict(recovery_failures))
 
         # Build each wave after feedback from the preceding wave. A precomputed
         # episode-wide batch list would ignore the model's recovered smaller size.
@@ -268,7 +289,8 @@ class Worker:
                         partial = getattr(error, "translations", {})
                         candidate = translations | partial
                         doc.validate_translations(candidate, require_all=False)
-                        self.store.checkpoint(jid, partial)
+                        self.store.checkpoint(jid, partial, error.fragment_checkpoints, error.invalidated_fragments)
+                        record_recovery(vars(error))
                         translations = candidate
                         record_usage(error.usage)
                         record_diagnostics(error.diagnostics)
@@ -278,7 +300,8 @@ class Worker:
                         continue
                     candidate = translations | result["translations"]
                     doc.validate_translations(candidate, require_all=False)
-                    self.store.checkpoint(jid, result["translations"])
+                    self.store.checkpoint(jid, result["translations"], result.get('fragment_checkpoints'))
+                    record_recovery(result)
                     translations = candidate
                     if result.get("recovered"):
                         suggested = max(1, result["batch_size"])
@@ -297,7 +320,7 @@ class Worker:
                     if streak >= 3:
                         limit = min(config["batch_size"], max(limit+1, (limit*3+1)//2))
                         streak = 0
-                self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 3, "size": limit})
+                self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 4, "size": limit})
                 if failure:
                     raise failure
             except asyncio.CancelledError:

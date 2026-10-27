@@ -43,6 +43,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS checkpoints (job TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL,
                     PRIMARY KEY(job,id));
+                CREATE TABLE IF NOT EXISTS fragment_checkpoints (job TEXT NOT NULL, id TEXT NOT NULL,
+                    source_hash TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY(job,id));
             """)
         os.chmod(self.path, 0o600)
 
@@ -130,6 +132,7 @@ class Store:
             for jid, patch in changes.items():
                 if restart:
                     db.execute("DELETE FROM checkpoints WHERE job=?", (jid,))
+                    db.execute("DELETE FROM fragment_checkpoints WHERE job=?", (jid,))
                 db.execute("UPDATE jobs SET data=? WHERE id=?", (json.dumps(records[jid] | patch), jid))
 
     def delete_provider(self, pid: str):
@@ -166,9 +169,18 @@ class Store:
             db.execute("UPDATE jobs SET data=? WHERE id=?", (json.dumps(data), jid))
         return data
 
-    def checkpoint(self, jid: str, translations: dict[str,str]):
+    def checkpoint(self, jid: str, translations: dict[str,str], fragments: dict[str,dict] | None = None,
+                   evict: list[str] | None = None):
         with self.connect() as db:
+            db.executemany('DELETE FROM fragment_checkpoints WHERE job=? AND id=?', [(jid, key) for key in (evict or [])])
             db.executemany("INSERT OR REPLACE INTO checkpoints VALUES(?,?,?)", [(jid, k, v) for k,v in translations.items()])
+            db.executemany("INSERT OR REPLACE INTO fragment_checkpoints VALUES(?,?,?,?)",
+                           [(jid, key, value['source_hash'], value['text']) for key, value in (fragments or {}).items()])
+
+    def fragments(self, jid: str) -> dict[str,dict[str,str]]:
+        with self.connect() as db:
+            return {key: {'source_hash': source_hash, 'text': text} for key, source_hash, text in
+                    db.execute('SELECT id,source_hash,text FROM fragment_checkpoints WHERE job=?', (jid,))}
 
     def delete_jobs(self, ids: list[str]):
         # Recheck under the same write transaction as deletion: a concurrent
@@ -182,6 +194,7 @@ class Store:
                 if json.loads(row[0])["status"] not in {"completed", "review", "error", "cancelled", "interrupted"}:
                     raise ValueError("Annulez les traitements actifs avant de les supprimer.")
             db.executemany("DELETE FROM checkpoints WHERE job=?", [(jid,) for jid in ids])
+            db.executemany("DELETE FROM fragment_checkpoints WHERE job=?", [(jid,) for jid in ids])
             db.executemany("DELETE FROM jobs WHERE id=?", [(jid,) for jid in ids])
 
     def translations(self, jid: str) -> dict[str,str]:

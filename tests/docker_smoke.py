@@ -124,7 +124,7 @@ def main():
                 sidecar = recovery_video.with_suffix('.en.ass')
                 sidecar.write_text(ASS + glyph_line + comment)
                 sidecar_hash = hashlib.sha256(sidecar.read_bytes()).hexdigest()
-                broken = client.post("/api/providers", json=provider | {"id": None, "model": "partial-test", "retries": 0, "batch_size": 4}).json()
+                broken = client.post("/api/providers", json=provider | {"id": None, "model": "fragment-test", "retries": 1, "batch_size": 4}).json()
                 path = "/media/" + recovery_video.relative_to(media).as_posix()
                 job_response = client.post("/api/jobs", json={"provider_id": broken["id"], "items": [{"path": path, "track_id": "external:" + sidecar.name}]})
                 job_response.raise_for_status()
@@ -136,9 +136,12 @@ def main():
                     time.sleep(0.2)
                 assert recovery_job["status"] == "error" and recovery_job["done"] > 0, recovery_job
                 assert recovery_job["done"] < recovery_job["total"]
+                assert recovery_job['diagnostics']['fragment_fallback'] == 1
+                assert 'fragment_retry_ids' not in recovery_job and 'fragment_checkpoints' not in recovery_job
+                before_calls = int(docker('exec', name, 'python', '-c', "from pathlib import Path; print(len(Path('/tmp/sillage-test-provider-requests.jsonl').read_text().splitlines()))"))
                 edited = client.post("/api/providers", json=broken | {"model": "deterministic", "concurrency": 2, "timeout": 180})
                 edited.raise_for_status()
-                assert next(j for j in client.get("/api/jobs").json() if j["id"] == recovery_id)["translation_profile"]["model"] == "partial-test"
+                assert next(j for j in client.get("/api/jobs").json() if j["id"] == recovery_id)["translation_profile"]["model"] == "fragment-test"
                 adopted = client.post("/api/jobs/reconfigure", json={"ids": [recovery_id], "provider_id": broken["id"]})
                 adopted.raise_for_status()
                 assert "provider_snapshot" not in adopted.text
@@ -149,6 +152,9 @@ def main():
                     time.sleep(0.2)
                 assert recovered_job["status"] == "review" and recovered_job["done"] == recovered_job["total"], recovered_job
                 assert recovered_job["translation_profile"]["model"] == "deterministic"
+                remaining_calls = json.loads(docker('exec', name, 'python', '-c',
+                    "import json,sys; from pathlib import Path; print(json.dumps([json.loads(line) for line in Path('/tmp/sillage-test-provider-requests.jsonl').read_text().splitlines()][int(sys.argv[1]):]))", str(before_calls)))
+                assert remaining_calls == [{'model': 'deterministic', 'ids': ['e000001.s0002']}], remaining_calls
                 recovered_content = client.get(f"/api/jobs/{recovery_id}/download").text
                 assert 'Bonjour' in recovered_content and glyph_line in recovered_content and comment in recovered_content
                 assert recovered_job['total'] == 2  # Only normal dialogue is translated.
@@ -158,7 +164,7 @@ def main():
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, partial JSON checkpoints/in-place recovery, preserved glyph effects and late comments, source hashes, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, persistent array failures/partial fragment checkpoints/one-missing-span recovery, preserved glyph effects and late comments, source hashes, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 

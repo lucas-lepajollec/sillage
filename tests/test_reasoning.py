@@ -188,7 +188,7 @@ async def test_mandatory_warning_survives_structural_failure():
 async def test_connection_reports_mandatory_reasoning_instead_of_blocking():
     def handler(request):
         assert json.loads(request.content)['reasoning_effort'] == 'low'
-        return httpx.Response(200, json=envelope(text=output([{'id': 'connection-check', 'text': ['Bonjour.', 'Au revoir.']}])))
+        return httpx.Response(200, json=envelope(text=output([{'id': 'connection-check.s0000', 'text': 'Bonjour.'}, {'id': 'connection-check.s0001', 'text': 'Au revoir.'}])))
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         message = await test_connection(config('xai', model='grok-4.7'), client=client)
     assert MANDATORY in message and 'validées' in message

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.10 — 2026-10-27
+
+- Stop repeating an array contract that a model persistently violates. Recover affected cues using stable explicit fragment IDs and a string-only response, across all thirteen adapters; restore exact source anchors locally and never infer missing boundaries.
+- Persist individually validated fragments with source hashes and remember the alternate recovery mode. After an error or process restart, request only missing fragments instead of retranslating valid pieces. Add an automatic fragment-checkpoint table while retaining existing jobs/settings/whole-cue checkpoints; confirmed restart/history deletion also clears partial fragments.
+- Accept an unambiguous singleton array around a plain cue. Keep rejecting nested/multi-value ambiguity, changed IDs, injected formatting, controls and empty text. Validate reconstructed cues and evict only their fragments if the combined output fails its guard.
+- Report safe per-cue validation reasons and actual expected/received span counts, refresh obsolete batch learning, and include fragment-only progress in profile language/adoption guards. Connection testing checks two explicit string fragments in one call, without paid repair attempts. Source media, timings and exclusive complete-output publication remain protected.
+
 ## 0.0.9 — 2026-10-27
 
 - Remove routine formatting-token copying from model generation across all thirteen adapters. Send each formatted cue as an ordered array of visible text spans, validate every returned span and rebuild exact source markers locally. Preserve line breaks, styles, entities, source timings and checkpoint compatibility; never guess a missing internal boundary or publish incomplete output.
