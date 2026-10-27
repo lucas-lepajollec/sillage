@@ -21,6 +21,61 @@ async def deterministic(config, segments, context, glossary=""):
     return {"translations": translations, "usage": {"input_tokens": 10, "output_tokens": 10}, "warnings": []}
 
 
+async def test_formatted_episode_uses_visible_slots_preserves_old_progress_and_reports_safe_errors(video, tmp_path):
+    import json
+    import httpx
+    from conftest import ASS
+    from sillage import providers
+    from test_providers import envelope, output
+    from test_text_slots import payload, translated
+    store, worker, request = environment(video, tmp_path, batch=10)
+    store.save_provider(store.provider(request['provider_id']) | {'retries': 1, 'concurrency': 2})
+    source = video.with_suffix('.en.ass')
+    header = ASS.split('Dialogue:')[0]
+    text = header + ''.join(r'Dialogue: 0,0:00:00.50,0:00:02.00,Default,,0,0,0,,{\i1}Hello{\i0} world!\NGoodbye.' + '\n' for _ in range(32))
+    source.write_text(text)
+    request['items'][0]['track_id'] = f'external:{source.name}'
+    job = (await worker.create(request))[0]
+    doc = SubtitleDocument(text, 'ass')
+    old = {doc.segments[0]['id']: doc.segments[0]['text'].replace('Hello', 'Bonjour').replace('world', 'monde').replace('Goodbye', 'Au revoir')}
+    store.checkpoint(job['id'], old)
+    store.patch(job['id'], batch_policy={'version': 2, 'size': 1})
+    hashes = [hashlib.sha256(path.read_bytes()).hexdigest() for path in [video, source]]
+    broken, calls = True, []
+    def handler(req):
+        cues = payload(req)['segments']
+        calls.append([cue['id'] for cue in cues])
+        assert all(isinstance(cue['text'], list) for cue in cues)
+        assert '__SILLAGE_' not in json.dumps(cues)
+        items = [cue | {'text': translated(cue['text'])} for cue in cues]
+        for item in items:
+            if broken and item['id'] == 'e000003':
+                item['text'] = ['fragment manquant']
+        return httpx.Response(200, json=envelope(text=output(items)))
+    original = providers.translate
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async def adapter(config, *args):
+            return await original(config, *args, client=client)
+        with patch('sillage.jobs.providers.translate', side_effect=adapter):
+            with pytest.raises(providers.StructuredOutputError, match='nombre de fragments'):
+                await worker.process(job['id'])
+            checkpointed = store.translations(job['id'])
+            assert len(checkpointed) == 8 and checkpointed.items() >= old.items()
+            assert store.job(job['id'])['diagnostics'] == {'slot_count': 3}
+            assert not video.with_suffix('.fr.ass').exists()
+            broken = False
+            calls.clear()
+            store.patch(job['id'], status='error')
+            worker.resume(job['id'])
+            await worker.process(job['id'])
+    assert not set(checkpointed).intersection(cue_id for call in calls for cue_id in call)
+    final = store.job(job['id'])
+    assert final['status'] == 'review' and final['done'] == final['total'] == 32  # Unknown reasoning control warning remains.
+    assert final['adaptive_batch_size'] > 1
+    assert video.with_suffix('.fr.ass').read_text() == text.replace('Hello', 'Bonjour').replace('world', 'monde').replace('Goodbye', 'Au revoir')
+    assert hashes == [hashlib.sha256(path.read_bytes()).hexdigest() for path in [video, source]]
+
+
 def environment(video, tmp_path, batch=1):
     store = Store(tmp_path / "config")
     config = ProviderConfig(kind="custom", name="Test provider", model="test-only", base_url="http://127.0.0.1:19999/v1",
@@ -698,21 +753,22 @@ async def test_reconfigure_group_is_atomic_and_refuses_actual_active_or_exported
     assert store.job(job['id']) == before
 
 
-async def test_valid_single_cues_grow_back_and_do_not_poison_the_next_episode(video, tmp_path):
+@pytest.mark.parametrize('policy', [2, 3])
+async def test_valid_single_cues_grow_back_and_do_not_poison_the_next_episode(video, tmp_path, policy):
     import shutil
     store, worker, request = environment(video, tmp_path, batch=20)
     source = video.with_suffix('.en.srt')
     source.write_text(''.join(f'{i}\n00:00:01,000 --> 00:00:02,000\nHello {i}\n\n' for i in range(1, 33)))
     request['items'][0]['track_id'] = f'external:{source.name}'
     job = (await worker.create(request))[0]
-    store.patch(job['id'], adaptive_batch_size=1, batch_policy={'version': 2, 'size': 1})
+    store.patch(job['id'], adaptive_batch_size=1, batch_policy={'version': policy, 'size': 1})
     sizes = []
     async def adapter(config, batch, *args):
         sizes.append(len(batch))
         return await deterministic(config, batch, *args)
     with patch('sillage.jobs.providers.translate', side_effect=adapter):
         await worker.process(job['id'])
-    assert sizes[:3] == [1, 1, 1]
+    assert sizes[:3] == ([1, 1, 1] if policy == 3 else [4, 4, 4])
     assert max(sizes) > 4
     assert len(store.translations(job['id'])) == 32
     second = video.with_name('next.mkv')
@@ -740,7 +796,12 @@ async def test_real_partial_json_failure_checkpoints_valid_cues_and_resume_reque
         batch = json.loads(json.loads(http_request.content)['messages'][1]['content'])['segments']
         calls.append([cue['id'] for cue in batch])
         valid = [cue for cue in batch if not broken or cue['id'] == 'e000001']
-        return httpx.Response(200, json=envelope(text=output([cue | {'text': cue['text'].replace('Hello', 'Bonjour').replace('Goodbye', 'Au revoir')} for cue in valid])))
+        from test_provider_recovery import translated
+        items = translated(valid)
+        for item in items:
+            value = item['text']
+            item['text'] = [part.replace('Goodbye', 'Au revoir') for part in value] if isinstance(value, list) else value.replace('Goodbye', 'Au revoir')
+        return httpx.Response(200, json=envelope(text=output(items)))
     original = providers.translate
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         async def adapter(config, *args):

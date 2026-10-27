@@ -184,7 +184,7 @@ class Worker:
                             "sync_proposal": None, "write_hash": None, "batch_policy": {},
                             "adaptive_batch_size": providers.initial_batch_size(config), "warnings": [] if restart else warnings}
             if restart:
-                changes[jid].update(done=0, progress=0, usage={})
+                changes[jid].update(done=0, progress=0, usage={}, diagnostics={})
         self.store.reconfigure_jobs(changes, restart)
         return [self.store.job(jid) for jid in ids]
 
@@ -215,9 +215,9 @@ class Worker:
         # evidence about that cue, not every episode/model request forever.
         initial = providers.initial_batch_size(config)
         state = job.get("batch_policy", {})
-        limit = min(config["batch_size"], max(1, state.get("size", initial))) if state.get("version") == 2 else initial
+        limit = min(config["batch_size"], max(1, state.get("size", initial))) if state.get("version") == 3 else initial
         streak = 0
-        self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 2, "size": limit})
+        self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 3, "size": limit})
         positions = {segment["id"]: index for index, segment in enumerate(doc.segments)}
 
         async def translate_batch(batch):
@@ -232,6 +232,13 @@ class Worker:
                 if isinstance(value, (int, float)):
                     usage[key] = usage.get(key, 0) + value
             self.store.patch(jid, usage=usage)
+
+        def record_diagnostics(result):
+            diagnostics = dict(self.store.job(jid).get("diagnostics", {}))
+            for key, value in result.items():
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    diagnostics[key] = diagnostics.get(key, 0) + value
+            self.store.patch(jid, diagnostics=diagnostics)
 
         # Build each wave after feedback from the preceding wave. A precomputed
         # episode-wide batch list would ignore the model's recovered smaller size.
@@ -264,6 +271,7 @@ class Worker:
                         self.store.checkpoint(jid, partial)
                         translations = candidate
                         record_usage(error.usage)
+                        record_diagnostics(error.diagnostics)
                         warnings.extend(w for w in error.warnings if w not in warnings)
                         failure = failure or error
                         self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(total,1)), warnings=warnings)
@@ -279,6 +287,7 @@ class Worker:
                         full_success = full_success or len(result["translations"]) >= limit
                     warnings.extend(w for w in result.get("warnings", []) if w not in warnings)
                     record_usage(result.get("usage", {}))
+                    record_diagnostics(result.get("diagnostics", {}))
                     self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(total,1)), warnings=warnings)
                     self.check_cancel(jid)
                 if reduced is not None:
@@ -288,7 +297,7 @@ class Worker:
                     if streak >= 3:
                         limit = min(config["batch_size"], max(limit+1, (limit*3+1)//2))
                         streak = 0
-                self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 2, "size": limit})
+                self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 3, "size": limit})
                 if failure:
                     raise failure
             except asyncio.CancelledError:

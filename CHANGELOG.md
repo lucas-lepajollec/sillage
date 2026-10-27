@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.9 — 2026-10-27
+
+- Remove routine formatting-token copying from model generation across all thirteen adapters. Send each formatted cue as an ordered array of visible text spans, validate every returned span and rebuild exact source markers locally. Preserve line breaks, styles, entities, source timings and checkpoint compatibility; never guess a missing internal boundary or publish incomplete output.
+- Exercise the real two-span contract in the single-call connection test, so a model that flattens structured cues cannot pass a plain-text-only check. Explain string/array responses with a worked example and provide sanitized failure-specific repair instructions. Accept an unwrapped single span only when its reconstruction is unambiguous. Preserve independently validated siblings and retry only invalid cues.
+- Distinguish malformed JSON, parsed-but-invalid cue data, changed span counts and formatting errors. Retain aggregate structural counters without source text, raw responses, credentials or thought contents, including across failed/resumed jobs.
+- Reset pre-slot batch learning when resuming older jobs; retain translated checkpoints and regrow current-contract limits normally. No provider/profile/schema migration or NAS rollout.
+
 ## 0.0.8 — 2026-10-27
 
 - Recognize ASS typography with repeated intra-word style changes as an unsupported glyph-level effect. Preserve these events exactly with a review warning instead of asking the model to keep dozens of letter-bound formatting tokens and repeatedly failing near the ending.

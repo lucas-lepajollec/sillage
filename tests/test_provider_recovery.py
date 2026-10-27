@@ -23,7 +23,9 @@ def cues(count=4):
 
 
 def translated(batch):
-    return [{"id": cue["id"], "text": cue["text"].replace("Hello", "Bonjour")} for cue in batch]
+    def text(value):
+        return [text(part) for part in value] if isinstance(value, list) else value.replace("Hello", "Bonjour")
+    return [{"id": cue["id"], "text": text(cue["text"])} for cue in batch]
 
 
 def request_batch(request):
@@ -112,7 +114,7 @@ def test_failed_descendant_raises_without_losing_independently_valid_cues():
         sizes.append(len(batch))
         items = translated(batch) if len(batch) == 2 and batch[0]["id"] == "cue-0" else []
         return httpx.Response(200, json=envelope(text=output(items)))
-    with pytest.raises(ProviderError, match="invalide ou incomplète") as error:
+    with pytest.raises(ProviderError, match="JSON est lisible") as error:
         invoke(handler, settings=config(retries=1), segments=cues())
     assert set(error.value.translations) == {"cue-0", "cue-1"}
     assert sizes == [4, 2, 2, 1, 1]
@@ -168,7 +170,7 @@ def test_recovery_never_splits_nonstructural_failures_or_when_retries_disabled(f
 def test_formatting_failure_has_a_specific_sanitized_diagnostic():
     with pytest.raises(ProviderError, match="balises protégées"):
         invoke(lambda request: httpx.Response(200, json=envelope(text=output([
-            {"id": "cue-0", "text": "Bonjour sans balises"}]))), segments=cues(1))
+            {"id": "cue-0", "text": "__SILLAGE_0001__Bonjour__SILLAGE_0000__"}]))), segments=cues(1))
 
 
 def test_output_limit_has_a_specific_diagnostic_even_with_complete_json():
@@ -227,7 +229,7 @@ def test_complete_json_fence_is_unwrapped_without_loosening_validation(wrapper):
 
 
 def test_prose_outside_json_is_still_rejected():
-    with pytest.raises(ProviderError, match='invalide ou incomplète'):
+    with pytest.raises(ProviderError, match='JSON invalide'):
         invoke(lambda request: httpx.Response(200, json=envelope(text='Here is the translation: ' + output())))
 
 
@@ -275,7 +277,7 @@ def test_moved_boundary_tokens_are_recovered_before_worker_validation():
         items = translated(batch)
         if len(batch) > 1:
             for item in items:
-                item['text'] = item['text'].replace('__SILLAGE_0000__', 'Bonjour __SILLAGE_0000__')
+                item['text'] = 'Bonjour __SILLAGE_0000__Texte.__SILLAGE_0001__'
         return httpx.Response(200, json=envelope(text=output(items)))
     result = invoke(handler, settings=config(retries=1), segments=cues())
     assert result['batch_size'] == 1 and len(result['translations']) == 4
@@ -300,7 +302,7 @@ def test_only_invalid_cue_is_retried_without_lowering_the_whole_batch_to_one():
         calls.append([cue['id'] for cue in batch])
         items = translated(batch)
         if len(calls) == 1:
-            items[2]['text'] = 'Bonjour sans les balises'
+            items[2]['text'] = ['Bonjour', 'fragment ajouté']
         return httpx.Response(200, json=envelope(text=output(items)))
     result = invoke(handler, settings=config(retries=1), segments=cues())
     assert calls == [['cue-0', 'cue-1', 'cue-2', 'cue-3'], ['cue-2']]

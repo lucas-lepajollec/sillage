@@ -130,7 +130,7 @@ def test_only_text_context_and_explicit_glossary_reach_provider():
     [{"id": "a", "text": "Bonjour"}, {"id": "a", "text": "duplicate"}],
 ])
 def test_rejects_missing_stray_empty_oversized_and_duplicate_cues(invalid):
-    with pytest.raises(ProviderError, match="invalide ou incomplète"):
+    with pytest.raises(ProviderError, match="JSON est lisible"):
         invoke(lambda req: httpx.Response(200, json=envelope(text=output(invalid))))
 
 
@@ -153,7 +153,7 @@ def test_exact_ids_are_preserved_even_if_provider_reorders_items():
 
 
 @pytest.mark.parametrize("text", [
-    "Salut.", "__SILLAGE_0001__Salut.__SILLAGE_0000__", "__SILLAGE_0000__Salut.",
+    "__SILLAGE_0001__Salut.__SILLAGE_0000__", "__SILLAGE_0000__Salut.",
     "__SILLAGE_0000__<i>Salut</i>__SILLAGE_0001__",
     "__SILLAGE_0000__Salut.\\N__SILLAGE_0001__",
 ])
@@ -269,8 +269,8 @@ def test_connection_executes_one_tiny_structured_model_call():
     def handler(request):
         attempts.append(request)
         user = json.loads(json.loads(request.content)["messages"][1]["content"])
-        assert user["segments"] == [{"id": "connection-check", "text": "Hello."}]
-        return httpx.Response(200, json=envelope(text=output([{"id": "connection-check", "text": "Bonjour."}])) )
+        assert user["segments"] == [{"id": "connection-check", "text": ["Hello.", "Goodbye."]}]
+        return httpx.Response(200, json=envelope(text=output([{"id": "connection-check", "text": ["Bonjour.", "Au revoir."]}])) )
     async def perform():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await test_connection(config(retries=5), client=client)
