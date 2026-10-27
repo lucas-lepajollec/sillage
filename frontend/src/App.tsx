@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { ACCESS_KEY, api, message } from "./api";
 import { activeStatuses, cn } from "./lib";
-import type { Health, Job, Provider } from "./types";
+import type { Health, Job, Provider, Reanalysis } from "./types";
 import { Button } from "./components/ui/button";
 import { ErrorNotice, Logo, Spinner } from "./components/shared";
 import { Explorer, LibraryTree } from "./components/explorer";
@@ -44,6 +44,7 @@ export default function App() {
   const client = useQueryClient();
   const [page, setPage] = useState<Page>(getPage);
   const [path, setPath] = useState("");
+  const [reanalysis, setReanalysis] = useState<Reanalysis | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [locked, setLocked] = useState(false);
   const [toast, setToast] = useState<{ text: string; error: boolean } | null>(
@@ -283,6 +284,8 @@ export default function App() {
                 notify={notify}
                 onSettings={() => navigate("settings")}
                 onJobs={() => navigate("translations")}
+                reanalysis={reanalysis}
+                onReanalysisConsumed={() => setReanalysis(null)}
               />
             </div>
           }
@@ -294,6 +297,11 @@ export default function App() {
               retry={() => void jobs.refetch()}
               notify={notify}
               onExplore={() => navigate("explorer")}
+              onReanalyzed={(result) => {
+                setPath(result.episode.path.slice(0, result.episode.path.lastIndexOf("/")));
+                setReanalysis(result);
+                navigate("explorer");
+              }}
             />
           )}
           {page === "settings" && (

@@ -101,3 +101,33 @@ def test_unknown_api_route_does_not_serve_spa(video, tmp_path, monkeypatch):
         assert client.get("/settings").status_code == 200
         assert client.get("/api/does-not-exist").status_code == 404
         assert client.get("/").headers["x-content-type-options"] == "nosniff"
+
+
+def test_reanalysis_is_read_only_and_history_delete_keeps_source(video, tmp_path):
+    from unittest.mock import patch
+    app = create_app(tmp_path / "config", [video.parent], run_worker=False)
+    with TestClient(app) as client:
+        episode = app.state.library.inspect(video)
+        provider = client.post("/api/providers", json={"kind": "custom", "model": "fixture", "base_url": "http://127.0.0.1:19999/v1"}).json()
+        job = client.post("/api/jobs", json={"items": [{"path": str(video), "track_id": episode["tracks"][0]["id"]}], "provider_id": provider["id"]}).json()[0]
+        app.state.store.patch(job["id"], status="cancelled")
+        app.state.store.checkpoint(job["id"], {"e000001": "Bonjour"})
+        before = app.state.store.job(job["id"])
+        with patch("sillage.jobs.providers.translate") as translate:
+            response = client.post(f"/api/jobs/{job['id']}/reanalyze", json={})
+        assert response.status_code == 200 and response.json() == episode
+        translate.assert_not_called()
+        assert app.state.store.job(job["id"]) == before
+        assert app.state.store.translations(job["id"]) == {"e000001": "Bonjour"}
+        result = client.post("/api/jobs/delete", json={"ids": [job["id"]]})
+        assert result.status_code == 200 and result.json() == {"deleted": [job["id"]], "warnings": []}
+        assert client.get("/api/jobs").json() == [] and video.is_file()
+        assert not app.state.store.translations(job["id"])
+        assert client.post(f"/api/jobs/{job['id']}/reanalyze", json={}).status_code == 400
+
+
+def test_history_deletion_requires_auth_and_rejects_extra_fields(video, tmp_path, monkeypatch):
+    monkeypatch.setenv("ACCESS_KEY", "TEST-ONLY-access-key")
+    with TestClient(create_app(tmp_path / "config", [video.parent], run_worker=False)) as client:
+        assert client.post("/api/jobs/delete", json={"ids": ["a" * 32]}).status_code == 401
+        assert client.post("/api/jobs/delete", json={"ids": ["a" * 32], "delete_exports": True}, headers={"X-Access-Key": "TEST-ONLY-access-key"}).status_code == 422

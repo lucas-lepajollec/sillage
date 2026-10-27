@@ -99,11 +99,21 @@ def main():
                     assert b"Bonjour" in client.get(f"/api/jobs/{job['id']}/download").content
                     preview = client.get(f"/api/jobs/{job['id']}/preview").json()
                     assert preview["cues"][0]["start"] == 500
+                previous = client.get("/api/jobs").json()
+                inspected = client.post(f"/api/jobs/{jobs[0]['id']}/reanalyze", json={})
+                inspected.raise_for_status()
+                assert inspected.json()["path"] == jobs[0]["path"]
+                assert client.get("/api/jobs").json() == previous
+                deletion = client.post("/api/jobs/delete", json={"ids": [jobs[0]["id"]]})
+                deletion.raise_for_status()
+                assert deletion.json() == {"deleted": [jobs[0]["id"]], "warnings": []}
+                assert len(client.get("/api/jobs").json()) == 1
+                docker("exec", name, "python", "-c", "from pathlib import Path; import sys; assert Path(sys.argv[1]).is_file()", jobs[0]["output"])
                 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*.mkv")} == original
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, no source mutation, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, source hashes, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 

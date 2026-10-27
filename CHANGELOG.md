@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.6 — 2026-10-27
+
+- Add a default folder view for translation history, grouped by exact source directory with counts, searchable/status-filtered cards and pagination. Keep a remembered List alternative.
+- Add confirmed per-job and scoped bulk cleanup of inactive history, checkpoints and work files while preserving media, source subtitles, profiles and exported sidecars. Reject active/in-flight jobs, serialize synchronization decisions, avoid following work symlinks and report cleanup-permission failures.
+- Reanalyze a job's source without a provider call and reopen its episode/track preview in the explorer. Retain the old job/checkpoints, warn when its track disappeared and require an explicit new translation action. Existing exports remain protected.
+- Scope bulk error retries and history cleanup to the current folder/search/filter across pages. No configuration/schema migration or provider/timing policy change.
+
 ## 0.0.5 — 2026-10-27
 
 - Make source-track selection explicit per episode, with a direct preview, automatic/manual choice labels and default/forced/SDH/stream metadata. Highlight forced/signs-only sources and show eligible versus preserved event counts without an AI call.

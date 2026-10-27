@@ -130,6 +130,7 @@ export type Job = {
     warnings: string[];
   } | null;
 };
+export type Reanalysis = { episode: Episode; job: Job };
 export type Health = {
   status: string;
   tools: Record<string, boolean>;

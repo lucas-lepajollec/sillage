@@ -91,6 +91,7 @@ test("real library → track preview → provider → selected episodes → expo
   await expect(
     page.getByRole("heading", { name: "Traductions", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Liste", exact: true }).click();
   await expect(page.locator(".job-card.job-review")).toHaveCount(2, {
     timeout: 30_000,
   });
@@ -131,6 +132,24 @@ test("real library → track preview → provider → selected episodes → expo
     fullPage: true,
     animations: "disabled",
   });
+  let newGenerations = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/jobs")) newGenerations++;
+  });
+  const firstCard = page.locator(".job-card").first();
+  const name = await firstCard.locator(".job-title strong").innerText();
+  await firstCard.getByRole("button", { name: `Réanalyser ${name}`, exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("Hello");
+  await expect(page.getByRole("dialog").getByLabel("Informations de la piste source")).toContainText("English · Full dialogue");
+  await page.getByRole("button", { name: "Fermer l’aperçu", exact: true }).click();
+  await expect(page.getByText("ÉPISODE RÉANALYSÉ", { exact: true })).toBeVisible();
+  expect(newGenerations).toBe(0);
+  await page.getByRole("link", { name: "Traductions", exact: true }).click();
+  await expect(page.locator(".job-card")).toHaveCount(2);
+  await page.getByRole("button", { name: `Supprimer de l’historique ${name}`, exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("sous-titres déjà exportés restent sur votre disque");
+  await page.getByRole("button", { name: "Supprimer définitivement ces entrées", exact: true }).click();
+  await expect(page.locator(".job-card")).toHaveCount(1);
   expect(errors).toEqual([]);
 });
 

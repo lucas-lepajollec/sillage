@@ -22,6 +22,8 @@ Cette heuristique ne prouve pas un alignement phonétique. La mauvaise langue au
 
 ## Fichiers et exploitation
 
+La suppression de l’historique est définitive pour les entrées et leurs checkpoints ; elle conserve les MKV, pistes source, profils et sous-titres exportés. Les traitements actifs doivent d’abord être annulés et avoir terminé leurs opérations en cours. Un nettoyage de fichiers temporaires refusé par les permissions est signalé, même si les entrées SQL ont déjà été supprimées. La réanalyse relit la source sans appeler le modèle ni remettre un traitement en file automatiquement ; l’ancien traitement reste disponible. Une nouvelle traduction ne peut pas écraser un export présent.
+
 Toutes les entrées média passent par les racines canoniques autorisées ; la navigation masque les liens symboliques. Les outils reçoivent des listes d’arguments, jamais une commande shell interpolée. Les sorties utilisent un fichier temporaire et une publication atomique exclusive dans un descripteur de dossier ouvert sans suivi de liens. Un fichier déjà présent n’est jamais remplacé. Une coupure avant publication ne laisse pas de résultat définitif partiel. Une coupure pendant l’écriture peut laisser un temporaire caché ; il n’est pas annoncé comme résultat.
 
 Le propriétaire du stockage et l’administrateur du NAS restent des acteurs de confiance. Les racines médias et `/config` ne doivent pas être modifiées par des utilisateurs hostiles pendant le traitement. Les transactions SQLite et empreintes de source/configuration protègent la reprise ; ce n’est pas une sandbox système contre l’administrateur. Sauvegardes et espace libre restent à la charge de l’opérateur.

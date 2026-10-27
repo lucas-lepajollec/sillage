@@ -5,6 +5,9 @@ import asyncio
 import hashlib
 import json
 import os
+import re
+import shutil
+import stat
 import tempfile
 import uuid
 from pathlib import Path
@@ -307,6 +310,52 @@ class Worker:
         if any(j["id"] != jid and j["path"] == job["path"] and (j["status"] in ACTIVE or j.get("sync_pending")) for j in self.store.jobs()):
             raise ValueError("Un autre traitement est déjà actif pour cet épisode.")
         return self.store.patch(jid, status="queued", error=None, cancel_requested=False, sync_pending=False)
+
+    async def delete(self, ids: list[str]) -> dict:
+        if not 1 <= len(ids) <= 500 or len(set(ids)) != len(ids) or any(not re.fullmatch(r"[a-f0-9]{32}", jid) for jid in ids):
+            raise ValueError("Sélectionnez entre 1 et 500 identifiants de traduction valides et distincts.")
+        # Same event loop as the queue; no await between active-job checks and
+        # the atomic SQLite deletion. Serialize with sync decisions as well.
+        async with self.sync_lock:
+            if self.active in ids or any(jid in self.inflight for jid in ids):
+                raise ValueError("Le traitement termine son annulation. Réessayez dans un instant.")
+            try:
+                fd = os.open(self.store.folder / "work", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                fd = None
+            try:
+                self.store.delete_jobs(ids)
+                if fd is None:
+                    warnings = []
+                else:
+                    cleanup_fd, fd = fd, None
+                    # The cleanup task owns its descriptor, including on HTTP
+                    # cancellation; never close/reuse it beneath rmtree().
+                    cleanup = asyncio.create_task(asyncio.to_thread(self._clean_work, ids, cleanup_fd))
+                    warnings = await asyncio.shield(cleanup)
+            finally:
+                if fd is not None:
+                    os.close(fd)
+        return {"deleted": ids, "warnings": warnings}
+
+    @staticmethod
+    def _clean_work(ids: list[str], fd: int) -> list[str]:
+        incomplete = False
+        try:
+            for jid in ids:
+                try:
+                    mode = os.stat(jid, dir_fd=fd, follow_symlinks=False).st_mode
+                    if stat.S_ISDIR(mode):
+                        shutil.rmtree(jid, dir_fd=fd)
+                    else:
+                        os.unlink(jid, dir_fd=fd)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    incomplete = True
+        finally:
+            os.close(fd)
+        return ["Historique supprimé, mais certains fichiers de travail restent présents. Vérifiez les permissions de /config/work."] if incomplete else []
 
     async def decide_sync(self, jid: str, accept: bool) -> dict:
         async with self.sync_lock:

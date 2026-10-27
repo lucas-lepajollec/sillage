@@ -48,7 +48,7 @@ import {
   preferredTrack,
   trackLabel,
 } from "../lib";
-import type { Browse, Episode, Job, Provider, Scan, SyncMode } from "../types";
+import type { Browse, Episode, Job, Provider, Reanalysis, Scan, SyncMode } from "../types";
 import { Button } from "./ui/button";
 import { Empty, ErrorNotice, Modal, Spinner, StepHint } from "./shared";
 import { PreviewDrawer } from "./preview";
@@ -220,6 +220,8 @@ export function Explorer({
   notify,
   onSettings,
   onJobs,
+  reanalysis,
+  onReanalysisConsumed,
 }: {
   path: string;
   setPath: (path: string) => void;
@@ -228,6 +230,8 @@ export function Explorer({
   notify: (text: string, error?: boolean) => void;
   onSettings: () => void;
   onJobs: () => void;
+  reanalysis: Reanalysis | null;
+  onReanalysisConsumed: () => void;
 }) {
   const client = useQueryClient();
   const [search, setSearch] = useState("");
@@ -246,6 +250,7 @@ export function Explorer({
   const [syncOpen, setSyncOpen] = useState(false);
   const [confirmFrench, setConfirmFrench] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [inspected, setInspected] = useState<{ path: string; data: Scan } | null>(null);
   const browse = useQuery({
     queryKey: ["browse", path],
     queryFn: () => api<Browse>(`/browse?path=${encodeURIComponent(path)}`),
@@ -255,6 +260,7 @@ export function Explorer({
     mutationFn: (body: { path: string; recursive: boolean }) =>
       api<Scan>("/scan", body),
     onSuccess: (data) => {
+      setInspected(null);
       setSelection({});
       setTracks({});
       if (data.errors.length)
@@ -266,7 +272,8 @@ export function Explorer({
     onError: (e) => notify(message(e), true),
   });
   const scanned =
-    scan.data && scan.variables?.path === currentPath ? scan.data : undefined;
+    inspected?.path === currentPath ? inspected.data :
+      scan.data && scan.variables?.path === currentPath ? scan.data : undefined;
   const episodes = scanned?.episodes || [];
   const selectedProvider =
     providers.find((p) => p.id === providerId) || providers[0];
@@ -294,7 +301,25 @@ export function Explorer({
     setSearch("");
     setDetail(null);
     setTrackSelection(null);
+    setInspected(null);
   }, [path]);
+  useEffect(() => {
+    if (!reanalysis) return;
+    scan.reset();
+    const { episode, job } = reanalysis;
+    const folder = episode.path.slice(0, episode.path.lastIndexOf("/"));
+    setInspected({ path: folder, data: { episodes: [episode], errors: [] } });
+    setSelection(canTranslate(episode) ? { [episode.path]: true } : {});
+    const sameTrack = episode.tracks.some((t) => t.id === job.track_id && t.supported);
+    setTracks(sameTrack ? { [episode.path]: job.track_id } : {});
+    setFilters(defaultFilters);
+    setDetail(episode);
+    setProviderId(job.provider_id);
+    setSyncMode(job.sync_mode);
+    setOffset(job.offset_ms);
+    notify(sameTrack ? "Source réanalysée sans appel à l’IA. L’ancien traitement et ses checkpoints sont conservés." : "L’ancienne piste n’est plus disponible. Vérifiez le nouveau choix avant de traduire.");
+    onReanalysisConsumed();
+  }, [reanalysis]);
   useEffect(() => {
     localStorage.setItem("sillage.filters", JSON.stringify(filters));
   }, [filters]);
@@ -685,7 +710,7 @@ export function Explorer({
           <>
             <div className="results-heading">
               <div>
-                <span className="section-label">RÉSULTATS DU SCAN</span>
+                <span className="section-label">{inspected ? "ÉPISODE RÉANALYSÉ" : "RÉSULTATS DU SCAN"}</span>
                 <strong>
                   {episodes.length} épisode{episodes.length > 1 ? "s" : ""}
                 </strong>
@@ -710,6 +735,7 @@ export function Explorer({
                 <Subtitles size={15} />Choisir les pistes
               </Button>
             </div>}
+            {inspected && <p className="reanalysis-notice">L’ancien traitement et ses checkpoints sont conservés. Une nouvelle traduction ne remplace jamais un sous-titre déjà exporté. Pour analyser les autres épisodes, utilisez « Scanner le dossier ».</p>}
             {(filterOpen || filterCount > 0) && (
               <div className="filters" aria-label="Filtres des épisodes">
                 <label>

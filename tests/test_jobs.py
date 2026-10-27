@@ -447,3 +447,145 @@ async def test_reasoning_warning_survives_resume_after_all_cues_were_checkpointe
     result = store.job(job['id'])
     assert result['status'] == 'review' and result['output']
     assert result['warnings'].count(MANDATORY) == 1
+
+
+async def test_delete_completed_job_keeps_media_and_exports(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    original = video.read_bytes()
+    job = (await worker.create(request))[0]
+    with patch("sillage.jobs.providers.translate", side_effect=deterministic):
+        await worker.process(job["id"])
+    finished = store.job(job["id"])
+    exported = Path(finished["output"])
+    content = exported.read_bytes()
+    assert store.translations(job["id"])
+    result = await worker.delete([job["id"]])
+    assert result == {"deleted": [job["id"]], "warnings": []}
+    assert not store.jobs() and not store.translations(job["id"])
+    assert not (store.folder / "work" / job["id"]).exists()
+    assert video.read_bytes() == original and exported.read_bytes() == content
+    assert store.providers()
+
+
+async def test_history_delete_is_atomic_when_one_job_active_or_missing(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    first = (await worker.create(request))[0]
+    store.patch(first["id"], status="error")
+    second = first | {"id": "a" * 32, "status": "queued"}
+    store.put_job(second)
+    store.checkpoint(first["id"], {"e000001": "Bonjour"})
+    work = store.folder / "work" / first["id"]
+    work.mkdir(parents=True)
+    (work / "source.srt").write_text("preserved")
+    for invalid in [second["id"], "b" * 32]:
+        with pytest.raises(ValueError):
+            await worker.delete([first["id"], invalid])
+        assert len(store.jobs()) == 2 and store.translations(first["id"])
+        assert (work / "source.srt").read_text() == "preserved"
+    store.patch(first["id"], status="cancelled")
+    worker.active = first["id"]
+    with pytest.raises(ValueError, match="annulation"):
+        await worker.delete([first["id"]])
+    worker.active = None
+    worker.inflight[first["id"]] = []
+    with pytest.raises(ValueError, match="annulation"):
+        await worker.delete([first["id"]])
+    assert len(store.jobs()) == 2
+
+
+@pytest.mark.parametrize("ids", [[], ["../media"], ["a" * 32] * 2, ["x" * 32], ["a" * 32] * 501])
+async def test_history_delete_rejects_invalid_ids_before_work_access(video, tmp_path, ids):
+    store, worker, _ = environment(video, tmp_path)
+    with pytest.raises(ValueError, match="identifiants"):
+        await worker.delete(ids)
+    assert store.jobs() == []
+
+
+async def test_history_delete_never_follows_work_symlinks_or_stored_paths(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    outside = tmp_path / "keep"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    store.patch(job["id"], status="error", source_file=str(outside / "keep.txt"), output=str(outside / "keep.txt"))
+    root = store.folder / "work"
+    root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        await worker.delete([job["id"]])
+    assert store.job(job["id"])
+    root.unlink()
+    root.mkdir()
+    (root / job["id"]).symlink_to(outside, target_is_directory=True)
+    assert (await worker.delete([job["id"]]))["warnings"] == []
+    assert not (root / job["id"]).is_symlink()
+    assert (outside / "keep.txt").read_text() == "keep"
+
+
+async def test_history_cleanup_failure_is_reported_after_atomic_sql_deletion(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    store.patch(job["id"], status="error")
+    store.checkpoint(job["id"], {"e000001": "Bonjour"})
+    work = store.folder / "work" / job["id"]
+    work.mkdir(parents=True)
+    with patch("sillage.jobs.shutil.rmtree", side_effect=PermissionError):
+        result = await worker.delete([job["id"]])
+    assert result["deleted"] == [job["id"]] and result["warnings"]
+    assert not store.jobs() and not store.translations(job["id"])
+    assert work.is_dir() and video.is_file()
+
+
+async def test_history_delete_waits_for_sync_decision(video, tmp_path):
+    import asyncio
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    store.patch(job["id"], status="review", sync_pending=True, sync_proposal={"offset_ms": 0})
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def finalize(*args):
+        entered.set()
+        await release.wait()
+        store.patch(job["id"], status="completed", sync_pending=False)
+    with patch.object(worker, "finalize", side_effect=finalize):
+        decision = asyncio.create_task(worker.decide_sync(job["id"], True))
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        deletion = asyncio.create_task(worker.delete([job["id"]]))
+        await asyncio.sleep(0)
+        assert not deletion.done() and store.job(job["id"])
+        release.set()
+        await asyncio.wait_for(decision, timeout=2)
+        assert (await asyncio.wait_for(deletion, timeout=2))["deleted"] == [job["id"]]
+
+
+async def test_history_cleanup_keeps_descriptor_owned_after_request_cancellation(video, tmp_path):
+    import asyncio
+    import os
+    import threading
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    store.patch(job["id"], status="error")
+    work = store.folder / "work" / job["id"]
+    work.mkdir(parents=True)
+    (work / "source.srt").write_text("fixture")
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = worker._clean_work
+    owned = []
+    def cleanup(ids, fd):
+        owned.append(fd)
+        started.set()
+        try:
+            assert release.wait(timeout=2)
+            os.fstat(fd)  # The HTTP coroutine must not close/reuse this FD.
+            return original(ids, fd)
+        finally:
+            finished.set()
+    with patch.object(worker, "_clean_work", side_effect=cleanup):
+        deletion = asyncio.create_task(worker.delete([job["id"]]))
+        assert await asyncio.to_thread(started.wait, 2)
+        deletion.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await deletion
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 2)
+    assert not work.exists() and not store.jobs()
+    with pytest.raises(OSError):
+        os.fstat(owned[0])

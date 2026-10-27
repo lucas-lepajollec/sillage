@@ -47,6 +47,11 @@ class JobRequest(BaseModel):
     offset_ms: int = Field(default=0, ge=-600000, le=600000)
 
 
+class DeleteJobsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class ModelListRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     id: str | None = Field(default=None, max_length=128)
@@ -182,6 +187,17 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
     @app.post("/api/jobs")
     async def create_jobs(data: JobRequest):
         return [public_job(j) for j in await worker.create(data.model_dump())]
+
+    @app.post("/api/jobs/delete")
+    async def delete_jobs(data: DeleteJobsRequest):
+        return await worker.delete(data.ids)
+
+    @app.post("/api/jobs/{jid}/reanalyze")
+    async def reanalyze_job(jid: str):
+        # Inspection only. Keep the existing job/checkpoints and never contact
+        # a provider or silently queue another generation.
+        job = store.job(jid)
+        return await asyncio.to_thread(library.inspect, job["path"])
 
     @app.post("/api/jobs/{jid}/cancel")
     def cancel_job(jid: str):
