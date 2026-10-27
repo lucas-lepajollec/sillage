@@ -31,6 +31,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 - Guided setup for OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Groq, Mistral, xAI, Ollama, LM Studio, vLLM, llama.cpp and compatible endpoints: live model discovery/search, manual fallback, multiple profiles and optional glossaries.
 - Strict cue IDs and protected formatting, neighboring context, bounded requests/retries and encrypted backend provider keys.
 - Adaptive batches start conservatively, retry only invalid cues, reduce temporarily and grow again after successful waves without slowing every later episode.
+- Per-letter ASS typography stays unchanged with review warnings; non-rendered editor comments cannot block an export merely by ending after the video.
 - SQLite checkpoints, real processing stages, cancellation and resume without retranslating validated batches.
 - Atomic external exports such as `Episode 01.fr.ass`, without replacing existing output.
 - Explicit manual offsets and conservative audio-only synchronization proposals requiring your acceptance.
@@ -74,7 +75,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.7` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.8` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 

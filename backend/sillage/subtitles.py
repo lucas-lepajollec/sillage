@@ -156,6 +156,11 @@ SRT_TIME = r"[0-9]{2}:[0-5][0-9]:[0-5][0-9],[0-9]{3}"
 SRT_TIMING = re.compile(rf"(?P<start>{SRT_TIME})[ \t]+-->[ \t]+(?P<end>{SRT_TIME})(?:[ \t]+[^\r\n]*)?")
 LAYOUT_OR_MARKUP = re.compile(r"\{[^}\r\n]*\}|<[^>\r\n]+>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z]+);|\\[Nnh]|\r\n|\n|\r|\t")
 ANIMATION = re.compile(r"\\(?:t\s*\(|move\s*\(|[kK](?:f|o|t)?\s*[0-9])")
+# Four intra-word style boundaries indicate glyph-level typography rather than
+# ordinary word/phrase emphasis. Copying those anchors cannot accommodate a
+# translation with different letters; retain the source as an unsupported effect.
+GLYPH_BOUNDARY = re.compile(r"(?<=[^\W\d_])(?:\{[^{}\r\n]*\})+(?=[^\W\d_])")
+GLYPH_WARNING = "Mise en forme ASS lettre par lettre conservée sans traduction."
 MAX_FILE = 30_000_000
 
 
@@ -171,6 +176,8 @@ class _Event:
     originals: tuple[str, ...] = ()
     warning: str | None = None
     translatable: bool = False
+    comment: bool = False
+    glyph_styling: bool = False
 
 
 def _milliseconds(value: str, format_: str) -> int:
@@ -276,7 +283,7 @@ class SubtitleDocument:
             doc.warnings.insert(0, f"Source {encoding} ; export UTF-8 sans perte de caractères décodés.")
         return doc
 
-    def _append(self, text: str, span, time_spans, start: str, end: str, warning=None):
+    def _append(self, text: str, span, time_spans, start: str, end: str, warning=None, *, comment: bool = False):
         start_ms, end_ms = _milliseconds(start, self.format), _milliseconds(end, self.format)
         if not 0 <= start_ms <= end_ms:
             event_id = f"e{len(self._events) + 1:06}"
@@ -286,7 +293,7 @@ class SubtitleDocument:
                              "Relancer le modèle ne corrigera pas ces timings ; choisissez une autre piste.")
         if start_ms == end_ms and not (warning or "").startswith("Commentaire"):
             warning = "Durée nulle : événement non affiché conservé sans traduction." + (" " + warning if warning else "")
-        event = _Event(f"e{len(self._events) + 1:06}", start_ms, end_ms, text, span, time_spans, warning=warning)
+        event = _Event(f"e{len(self._events) + 1:06}", start_ms, end_ms, text, span, time_spans, warning=warning, comment=comment)
         self._events.append(event)
 
     def _parse_ass(self):
@@ -327,7 +334,7 @@ class SubtitleDocument:
             # Timestamp whitespace is outside the replaceable numeric span.
             times = tuple((positions[i][0] + len(parts[i]) - len(parts[i].lstrip()),
                            positions[i][1] - (len(parts[i]) - len(parts[i].rstrip()))) for i in (1, 2))
-            self._append(parts[-1], positions[-1], times, parts[1], parts[2], warning)
+            self._append(parts[-1], positions[-1], times, parts[1], parts[2], warning, comment=match["kind"] == "Comment")
 
     def _parse_srt(self):
         block = []
@@ -359,6 +366,9 @@ class SubtitleDocument:
                         raise ValueError("Dessins vectoriels ou dessin mêlé au dialogue conservés sans traduction.")
                     if ANIMATION.search(event.text):
                         raise ValueError("Karaoké ou animation conservé sans traduction.")
+                    if sum(1 for _ in GLYPH_BOUNDARY.finditer(event.text)) >= 4:
+                        event.glyph_styling = True
+                        raise ValueError(GLYPH_WARNING)
                 protected, originals = _protect(event.text)
                 visible = PLACEHOLDER.sub("", protected)
                 if any(char in visible for char in "{}<>\\") or any(ord(c) < 32 or 0x7f <= ord(c) < 0xa0 for c in visible):
@@ -408,12 +418,23 @@ class SubtitleDocument:
             if not any(c.isalpha() for c in visible):
                 raise ValueError(f"{id_} : traduction sans texte visible.")
 
+    def resume_translations(self, checkpoints: Mapping[str, str]) -> dict[str, str]:
+        """Ignore only known, newly protected glyph effects from older jobs.
+
+        Their old checkpoint rows remain stored. Never render those translations,
+        infer replacements, or silently accept unknown/protected IDs of other kinds.
+        """
+        protected = {event.id for event in self._events if event.glyph_styling}
+        active = {key: value for key, value in checkpoints.items() if key not in protected}
+        self.validate_translations(active)
+        return active
+
     def timing_warnings(self, duration: float | None = None, offset_ms: int = 0) -> list[str]:
         warnings = []
         for event in self._events:
             if event.start + offset_ms < 0 or event.end + offset_ms < event.start + offset_ms:
                 warnings.append(f"{event.id} : timing négatif ou durée invalide.")
-            if duration and event.start != event.end and event.end + offset_ms > duration * 1000:
+            if duration and not event.comment and event.start != event.end and event.end + offset_ms > duration * 1000:
                 warnings.append(f"{event.id} : fin après la durée vidéo.")
         return warnings
 

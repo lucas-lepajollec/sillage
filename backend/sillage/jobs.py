@@ -205,8 +205,10 @@ class Worker:
         track = next(t for t in info["tracks"] if t["id"] == job["track_id"])
         self.store.patch(jid, source_hash=digest, source_file=str(source), total=len(doc.segments), warnings=warnings,
                          source_track={k: v for k, v in track.items() if k != "path"})
-        translations = self.store.translations(jid)
-        doc.validate_translations(translations, require_all=False)
+        saved = self.store.translations(jid)
+        translations = doc.resume_translations(saved)
+        if len(saved) != len(translations):
+            warnings.append(f"{len(saved)-len(translations)} ancienne(s) traduction(s) d’effets lettre par lettre écartée(s) de l’export ; source conservée, checkpoints archivés.")
         pending = [s for s in doc.segments if s["id"] not in translations]
         total = len(doc.segments)
         # Old per-profile minima are deliberately retired. A difficult cue is
@@ -334,7 +336,7 @@ class Worker:
             if hashlib.sha256(current.read_bytes()).hexdigest() != job["source_hash"]:
                 raise ValueError("La piste source a changé avant l’export. Aucun résultat publié.")
         self.validate_duration(doc, info["duration"], offset)
-        translations = self.store.translations(jid)
+        translations = doc.resume_translations(self.store.translations(jid))
         doc.validate_translations(translations, require_all=True)
         content = doc.render(translations, offset_ms=offset)
         self.check_cancel(jid)
@@ -349,7 +351,9 @@ class Worker:
         if not recovered:
             self.store.patch(jid, write_hash=expected_hash)
             path = await asyncio.to_thread(self.library.publish, job["path"], suffix, content)
-        self.store.patch(jid, status="review" if job["warnings"] else "completed", progress=100, output=str(path), error=None,
+        warnings = list(dict.fromkeys(job["warnings"] + doc.warnings))
+        self.store.patch(jid, status="review" if warnings else "completed", progress=100, output=str(path), error=None,
+                         warnings=warnings, done=len(translations), total=len(doc.segments),
                          sync_pending=False, applied_offset_ms=offset,
                          timing_status=f"Décalage explicite : {offset:+d} ms (audio non vérifié)" if job["sync_mode"] == "offset" else
                          f"Décalage audio accepté : {offset:+d} ms (première piste audio)" if job["sync_mode"] == "auto" and offset else
@@ -438,7 +442,7 @@ class Worker:
         if not job.get("source_file"):
             raise ValueError("L’extraction n’a pas encore commencé.")
         doc = SubtitleDocument.load(Path(job["source_file"]))
-        translations = self.store.translations(jid)
+        translations = doc.resume_translations(self.store.translations(jid))
         # Render+parse uses the same safe reconstruction as final output, rather than exposing placeholders.
         rendered = doc.render(translations)
         work = self.store.folder / "work" / jid
@@ -467,7 +471,7 @@ class Worker:
                 track_origin = "current" if track else "unavailable"
             except (ValueError, OSError, TimeoutExpired):
                 pass
-        return {"format": doc.format, "cues": cues, "warnings": job["warnings"], "timing_status": job["timing_status"],
+        return {"format": doc.format, "cues": cues, "warnings": list(dict.fromkeys(job["warnings"] + doc.warnings)), "timing_status": job["timing_status"],
                 "source_track": track, "source_track_origin": track_origin,
                 "stats": {"events": len(doc.cues), "translatable": len(doc.segments), "preserved": len(doc.cues) - len(doc.segments)},
                 "sync_pending": job.get("sync_pending", False), "sync_proposal": job.get("sync_proposal")}

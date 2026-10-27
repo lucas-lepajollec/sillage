@@ -22,6 +22,8 @@ class Handler(BaseHTTPRequestHandler):
         segments = json.loads(data["messages"][-1]["content"])["segments"]
         result = []
         for segment in segments:
+            if segment['text'].count('__SILLAGE_') >= 8:
+                raise AssertionError('Glyph-level effects must never reach the test provider')
             if data.get("model") == "partial-test" and segment["id"] == "e000002":
                 continue
             text = segment["text"].replace("Hello", "Bonjour").replace("world", "monde").replace("Goodbye", "Au revoir").replace("Station", "Gare")

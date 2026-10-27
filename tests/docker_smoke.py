@@ -115,9 +115,18 @@ def main():
                 recovery_video = recovery_source.with_name("Recovery fixture.mkv")
                 shutil.copyfile(recovery_source, recovery_video)
                 original[recovery_video.name] = hashlib.sha256(recovery_video.read_bytes()).hexdigest()
+                # Old fansub failure: per-letter typography and a late editor
+                # comment must stay exact and must never reach the provider.
+                from conftest import ASS
+                gradient = ''.join(r'{*\3c&H%06X&}' % (0x123400 + i) + char for i, char in enumerate('Fictional closing card'))
+                glyph_line = 'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,' + gradient + '\n'
+                comment = 'Comment: 0,0:00:05.00,0:00:08.00,Default,,0,0,0,,Fictional editor note\n'
+                sidecar = recovery_video.with_suffix('.en.ass')
+                sidecar.write_text(ASS + glyph_line + comment)
+                sidecar_hash = hashlib.sha256(sidecar.read_bytes()).hexdigest()
                 broken = client.post("/api/providers", json=provider | {"id": None, "model": "partial-test", "retries": 0, "batch_size": 4}).json()
                 path = "/media/" + recovery_video.relative_to(media).as_posix()
-                job_response = client.post("/api/jobs", json={"provider_id": broken["id"], "items": [{"path": path, "track_id": selected[0]["tracks"][0]["id"]}]})
+                job_response = client.post("/api/jobs", json={"provider_id": broken["id"], "items": [{"path": path, "track_id": "external:" + sidecar.name}]})
                 job_response.raise_for_status()
                 recovery_id = job_response.json()[0]["id"]
                 for _ in range(100):
@@ -140,12 +149,16 @@ def main():
                     time.sleep(0.2)
                 assert recovered_job["status"] == "review" and recovered_job["done"] == recovered_job["total"], recovered_job
                 assert recovered_job["translation_profile"]["model"] == "deterministic"
-                assert b"Bonjour" in client.get(f"/api/jobs/{recovery_id}/download").content
+                recovered_content = client.get(f"/api/jobs/{recovery_id}/download").text
+                assert 'Bonjour' in recovered_content and glyph_line in recovered_content and comment in recovered_content
+                assert recovered_job['total'] == 2  # Only normal dialogue is translated.
+                assert any('lettre par lettre' in warning for warning in recovered_job['warnings'])
+                assert hashlib.sha256(sidecar.read_bytes()).hexdigest() == sidecar_hash
                 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*.mkv")} == original
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, partial JSON checkpoints and in-place profile recovery, source hashes, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, partial JSON checkpoints/in-place recovery, preserved glyph effects and late comments, source hashes, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 
