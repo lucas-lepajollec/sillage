@@ -772,3 +772,39 @@ async def test_snapshot_key_never_follows_an_edited_endpoint_and_same_endpoint_r
     effective = worker.job_config(job)
     assert effective['base_url'] == initial['base_url']
     assert effective['api_key'] == 'TEST-ONLY-original-key'
+
+
+async def test_resume_old_all_checkpointed_ass_keeps_gradient_and_late_comment_without_new_paid_calls(video, tmp_path):
+    from conftest import ASS
+    from sillage.subtitles import _protect
+    store, worker, request = environment(video, tmp_path)
+    gradient = r'{\fad(120,120)\blur2}' + ''.join(r'{*\3c&H%06X&}' % (0x123400 + index) + char for index, char in enumerate('Fictional closing card'))
+    gradient_line = 'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,' + gradient + '\n'
+    comment = 'Comment: 0,0:00:05.00,0:00:08.00,Default,,0,0,0,,Fictional editor note\n'
+    source = video.with_suffix('.en.ass')
+    source.write_text(ASS + gradient_line + comment)
+    before = source.read_bytes()
+    request['items'][0]['track_id'] = f'external:{source.name}'
+    job = (await worker.create(request))[0]
+    doc = SubtitleDocument.load(source)
+    valid = (await deterministic({}, doc.segments, []))['translations']
+    legacy = valid | {doc.cues[-2]['id']: _protect(gradient)[0]}
+    store.checkpoint(job['id'], legacy)
+    store.patch(job['id'], status='error', done=len(legacy), total=len(legacy))
+    reopened = Worker(Store(store.folder), worker.library)
+    reopened.resume(job['id'])
+    with patch('sillage.jobs.providers.translate') as provider:
+        await reopened.process(job['id'])
+    provider.assert_not_called()
+    result = store.job(job['id'])
+    assert result['status'] == 'review'
+    assert result['done'] == result['total'] == len(valid)
+    assert store.translations(job['id']) == legacy  # Never delete the old stored work.
+    output = Path(result['output']).read_text()
+    assert gradient_line in output and comment in output and 'Bonjour' in output
+    assert source.read_bytes() == before
+    preview = reopened.preview(job['id'])
+    assert 'translated' not in preview['cues'][-2]
+    assert any('lettre par lettre' in warning for warning in preview['warnings'])
+    assert any('checkpoints archivés' in warning for warning in result['warnings'])
+    assert preview['stats']['translatable'] == len(valid)

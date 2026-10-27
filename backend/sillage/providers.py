@@ -609,7 +609,7 @@ async def translate(config: dict[str, Any] | ProviderConfig, segments: list[dict
                 error = "La réponse du fournisseur a atteint sa limite de sortie avant la fin de la traduction."
                 structural = truncated = True
             except _FormattingError:
-                error = "La traduction JSON est invalide ou incomplète : le fournisseur a modifié des balises protégées."
+                error = "Le fournisseur a modifié des balises protégées du sous-titre ; la mise en forme ne peut pas être validée."
                 structural = True
             except _InterruptedGenerationError:
                 error = "Le fournisseur a interrompu la génération avant sa fin. Réessayez plus tard ; aucun résultat partiel n’a été accepté."

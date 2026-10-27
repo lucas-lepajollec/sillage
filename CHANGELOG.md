@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.8 — 2026-10-27
+
+- Recognize ASS typography with repeated intra-word style changes as an unsupported glyph-level effect. Preserve these events exactly with a review warning instead of asking the model to keep dozens of letter-bound formatting tokens and repeatedly failing near the ending.
+- Resume older checkpoints safely when these effects were previously considered translatable: retain their stored rows, exclude those translations from rendering and update eligible counts. Keep rejecting unknown IDs and unrelated protected-event translations. Preview/finalization use the same policy, with no need to restart already translated dialogue.
+- Exclude non-rendered ASS comments from the video-end bound; keep their bytes/timestamps and preserve all visible-event, drawing, reversed/negative and explicit-offset guards. A late editor comment no longer blocks every translation before the first request.
+- Report protected-formatting failures as formatting errors instead of incorrectly calling successfully parsed JSON invalid. Source media, existing exports, provider settings and reasoning controls remain protected.
+
 ## 0.0.7 — 2026-10-27
 
 - Replace permanent profile-wide batch minima with per-job recovery and gradual growth after three successful full waves. Ignore historical size-1 learning; isolated difficult cues no longer slow every episode.

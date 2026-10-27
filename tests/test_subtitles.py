@@ -211,3 +211,54 @@ def test_zero_duration_is_preserved_exactly_and_never_sent_to_translation(format
 def test_reversed_source_timings_explain_why_model_retries_will_not_help():
     with pytest.raises(ValueError, match=r'e000001, ligne 3.*piste source.*00:00:03,000.*00:00:02,000.*Relancer'):
         SubtitleDocument('1\n00:00:03,000 --> 00:00:02,000\nHello\n', 'srt')
+
+
+def test_letter_level_ass_typography_is_retained_without_a_translation_request():
+    from conftest import ASS
+    gradient = r'{\fad(120,120)\blur2}' + ''.join(r'{*\3c&H%06X&}' % (0x123400 + index) + char for index, char in enumerate('Observatory doors open'))
+    line = 'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,' + gradient + '\n'
+    doc = SubtitleDocument(ASS + line, 'ass')
+    cue = doc.cues[-1]
+    assert 'lettre par lettre' in cue['warning']
+    assert cue['id'] not in {segment['id'] for segment in doc.segments}
+    assert doc.render({}) == doc.original
+    assert line in doc.render({segment['id']: segment['text'] for segment in doc.segments})
+    with pytest.raises(ValueError, match='protégé'):
+        doc.render({cue['id']: 'Do not rewrite this effect'})
+
+
+def test_normal_phrase_emphasis_and_positioned_signs_remain_translatable():
+    from conftest import ASS
+    text = r'{\an7\pos(15,20)\fad(100,100)}Open {\i1}the northern{\i0} door.\NPlease.'
+    doc = SubtitleDocument(ASS + 'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,' + text + '\n', 'ass')
+    assert doc.cues[-1]['id'] in {segment['id'] for segment in doc.segments}
+    assert not doc.cues[-1].get('warning')
+
+
+def test_only_newly_protected_typography_checkpoints_are_filtered_without_deleting_them():
+    from conftest import ASS
+    gradient = ''.join(r'{\c&H%06X&}' % (0x123400 + index) + char for index, char in enumerate('Fictional lettering'))
+    doc = SubtitleDocument(ASS + 'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,' + gradient + '\n', 'ass')
+    source = {segment['id']: segment['text'] for segment in doc.segments}
+    legacy = source | {doc.cues[-1]['id']: 'Old checkpoint remains archived'}
+    assert doc.resume_translations(legacy) == source
+    assert len(legacy) == len(source) + 1
+    with pytest.raises(ValueError, match='identifiant'):
+        doc.resume_translations(legacy | {'e999999': 'Unknown cue must still fail'})
+    doc = rich()
+    protected = next(cue for cue in doc.cues if 'Dessins' in cue.get('warning', ''))
+    with pytest.raises(ValueError, match='protégé'):
+        doc.resume_translations({protected['id']: 'Not an older typography checkpoint'})
+
+
+def test_non_rendered_ass_comments_may_extend_past_video_but_visible_events_still_fail():
+    from conftest import ASS
+    comment = 'Comment: 0,0:00:05.00,0:00:08.00,Default,,0,0,0,,Fictional editor note\n'
+    doc = SubtitleDocument(ASS + comment, 'ass')
+    assert not doc.timing_warnings(6)
+    assert comment in doc.render({})
+    visible = SubtitleDocument(ASS + comment.replace('Comment:', 'Dialogue:'), 'ass')
+    assert any('fin après la durée vidéo' in warning for warning in visible.timing_warnings(6))
+    drawing = SubtitleDocument(ASS + comment.replace('Comment:', 'Dialogue:').replace('Fictional editor note', r'{\p1}m 0 0 l 1 1{\p0}'), 'ass')
+    assert any('fin après la durée vidéo' in warning for warning in drawing.timing_warnings(6))
+    assert doc.timing_warnings(6, offset_ms=-6000)  # Comment offsets still require valid timestamps.
