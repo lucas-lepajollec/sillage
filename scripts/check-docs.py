@@ -23,7 +23,8 @@ readme = (ROOT / 'README.md').read_text()
 compose_example = re.search(r'```yaml\n(.*?)```', readme, re.S)
 if not compose_example or compose_example[1].strip() != (ROOT / 'docker-compose.yml').read_text().strip():
     errors.append('README quick-start Compose must exactly match docker-compose.yml')
-for file in ['AGENTS.override.md', '.project-local/CONTEXT.md', '.env', 'config/secret.key']:
+for file in ['AGENTS.override.md', '.project-local/CONTEXT.md', '.env', '.env.production',
+             'frontend/.env.local', 'private.pem', 'config/secret.key']:
     if subprocess.run(['git', 'check-ignore', '-q', file], cwd=ROOT).returncode:
         errors.append(f'Private path must be ignored: {file}')
 version = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']['version']

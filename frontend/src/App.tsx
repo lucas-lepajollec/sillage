@@ -161,10 +161,8 @@ export default function App() {
         aria-label="Navigation principale"
       >
         <a className="brand" href="#explorer" aria-label="Sillage, Explorer">
-          <Logo />
-          <span>
-            Sillage<span className="brand-sub">ATELIER DE SOUS-TITRES</span>
-          </span>
+          <span className="brand-heading"><Logo /><span className="brand-name">Sillage</span></span>
+          <span className="brand-sub">ATELIER DE SOUS-TITRES</span>
         </a>
         <div className="sidebar-label">ESPACE DE TRAVAIL</div>
         <nav className="main-nav">

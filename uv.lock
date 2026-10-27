@@ -453,13 +453,13 @@ wheels = [
 
 [[package]]
 name = "ffsubsync"
-version = "0.4.32"
+version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "auditok" },
     { name = "chardet" },
     { name = "charset-normalizer" },
-    { name = "faust-cchardet", marker = "python_full_version < '3.13'" },
+    { name = "faust-cchardet" },
     { name = "ffmpeg-python" },
     { name = "numpy" },
     { name = "pysubs2" },
@@ -469,9 +469,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "webrtcvad-wheels" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/2d/e2e1218f8a5129d331f8a7e756ec4e6e1ee683badbb4a88905af51148b8b/ffsubsync-0.4.32.tar.gz", hash = "sha256:1748f896c62c4a22f388aa81b5ded111cd46cd485347207c739a9217133d617d", size = 58638, upload-time = "2026-05-24T18:41:46.861Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/0d/6fbf220a6983840ebc2e1684c7a60d56786ccb480d8e9fdc10ad1af73782/ffsubsync-0.5.1.tar.gz", hash = "sha256:91a57724d95839f2e861758852e320789fb003c4f8c3432b3ecd928d9df65eb5", size = 108534, upload-time = "2026-07-24T04:52:50.099Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/bc/de06a392d66c432267d3250ac4ed4a72ece264fa604083ff35f2f9f930b2/ffsubsync-0.4.32-py2.py3-none-any.whl", hash = "sha256:78d340f24cca3169dfaf32e3c7d6d691ea8c256d07f46150bb6ee9684a01f2b3", size = 36274, upload-time = "2026-05-24T18:41:45.604Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/23/994f50c4a89f4df2b4aacb6ff72d31dc7ea09d614ef88e13baec2a3d1ae7/ffsubsync-0.5.1-py2.py3-none-any.whl", hash = "sha256:a312ea5d3c7e3e15a13565b2327022e2568ed6f12104b3ecf940ec4566d9ab4e", size = 65508, upload-time = "2026-07-24T04:52:49.041Z" },
 ]
 
 [[package]]
@@ -879,7 +879,7 @@ wheels = [
 
 [[package]]
 name = "sillage"
-version = "0.0.11"
+version = "0.0.12"
 source = { editable = "." }
 dependencies = [
     { name = "charset-normalizer" },
@@ -905,7 +905,7 @@ requires-dist = [
     { name = "charset-normalizer", specifier = ">=3.4,<4" },
     { name = "cryptography", specifier = ">=44" },
     { name = "fastapi", specifier = ">=0.115,<1" },
-    { name = "ffsubsync", marker = "extra == 'sync'", specifier = ">=0.4.29,<0.5" },
+    { name = "ffsubsync", marker = "extra == 'sync'", specifier = ">=0.5.1,<0.6" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pysubs2", specifier = ">=1.8,<2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },

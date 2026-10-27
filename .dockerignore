@@ -2,6 +2,16 @@
 .venv
 .data
 .env
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p8
+**/*.p12
+**/*.pfx
+**/*.db
+**/*.db-*
+**/*.sqlite3*
 config
 **/node_modules
 **/__pycache__

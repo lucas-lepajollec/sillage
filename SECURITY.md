@@ -13,3 +13,9 @@ Report vulnerabilities privately through [GitHub security advisories](https://gi
 - Authentication is an optional shared access key, not a multi-user identity system. No rate-limiting, adversarial filesystem sandbox or independent audit is claimed.
 
 Never enable provider HTTP body/header debug logging with real data. Preserve the secret key with the database when restoring. See [limitations](docs/limits.md) for the distinction between timing preservation, heuristic audio alignment and real-player validation.
+
+## Public repository hygiene
+
+Keep workstation paths, private host addresses, real media samples, configuration databases, environment files and credential containers out of tracked files and build contexts. Use fictional media for screenshots/tests. The repository ignores common private variants; exclusions do not sanitize files already committed.
+
+Use a GitHub noreply address for public commits and annotated tags if your account email should remain private. Git author/committer/tagger metadata is public independently of file contents. Removing an address from existing history requires a coordinated rewrite and may require hosting-provider cache/PR-reference cleanup; changing local Git configuration only affects future objects. Report sensitive historical findings privately, without copying their values into public issues.

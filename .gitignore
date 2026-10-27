@@ -9,6 +9,12 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 .env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.pfx
 config/
 *.log
 
