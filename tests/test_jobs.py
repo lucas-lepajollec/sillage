@@ -220,12 +220,18 @@ async def test_existing_french_output_and_duplicate_jobs_refused(video, tmp_path
     assert output.read_text() == "keep"
 
 
-async def test_changed_config_cannot_mix_checkpoints(video, tmp_path):
+async def test_profile_model_edit_does_not_change_a_queued_jobs_model_or_export_language(video, tmp_path):
     store, worker, request = environment(video, tmp_path)
     job = (await worker.create(request))[0]
-    store.save_provider(store.provider(job["provider_id"]) | {"model": "different"})
-    with pytest.raises(ValueError, match="configuration"):
+    store.save_provider(store.provider(job["provider_id"]) | {"model": "different", "target_language": "de"})
+    models = []
+    async def adapter(config, *args):
+        models.append((config["model"], config["target_language"]))
+        return await deterministic(config, *args)
+    with patch("sillage.jobs.providers.translate", side_effect=adapter):
         await worker.process(job["id"])
+    assert models == [("test-only", "fr"), ("test-only", "fr")]
+    assert store.job(job["id"])["output"].endswith(".fr.srt")
 
 
 async def test_protected_ass_events_produce_review_warning(media_factory, tmp_path):
@@ -311,8 +317,8 @@ async def test_adaptive_feedback_changes_next_wave_and_survives_resume_and_next_
             return await original_translate(config, batch, context, glossary, client=client)
         with patch('sillage.jobs.providers.translate', side_effect=adapter), pytest.raises(providers.StructuredOutputError):
             await worker.process(job['id'])
-        assert len(store.translations(job['id'])) == 4  # Failed descendants never checkpointed.
-        assert store.job(job['id'])['adaptive_batch_size'] == 1
+        assert len(store.translations(job['id'])) == 4  # Earlier valid cues survive the failing wave.
+        assert store.job(job['id'])['adaptive_batch_size'] == 4
         assert store.job(job['id'])['usage']['total_tokens'] == 75
         store.patch(job['id'], status='error')
         fail = False
@@ -321,7 +327,7 @@ async def test_adaptive_feedback_changes_next_wave_and_survives_resume_and_next_
         reopened.resume(job['id'])
         with patch('sillage.jobs.providers.translate', side_effect=adapter):
             await reopened.process(job['id'])
-        assert [len(batch) for batch in calls] == [1]*4
+        assert [len(batch) for batch in calls] == [4, 2, 1, 1, 2, 1, 1]
         assert all(batch[0] > 'e000004' for batch in calls)
         assert store.job(job['id'])['status'] == 'review'
         assert any('raisonnement' in w for w in store.job(job['id'])['warnings'])
@@ -334,7 +340,7 @@ async def test_adaptive_feedback_changes_next_wave_and_survives_resume_and_next_
         calls.clear()
         with patch('sillage.jobs.providers.translate', side_effect=adapter):
             await reopened.process(next_job['id'])
-        assert [len(batch) for batch in calls] == [1]*8
+        assert [len(batch) for batch in calls] == [4, 4, 2, 1, 1, 2, 1, 1]
         # A different model must never inherit the previous model's measured ceiling.
         store.save_provider(store.provider(request['provider_id']) | {'model': 'different-model'})
         third = video.with_name('Third episode.mkv')
@@ -381,7 +387,7 @@ async def test_recovered_size_is_used_by_next_wave_without_restarting(video, tmp
     with patch('sillage.jobs.providers.translate', side_effect=recovered):
         await worker.process(job['id'])
     assert sizes == [4, 1, 1, 1, 1]
-    assert store.job(job['id'])['adaptive_batch_size'] == 1
+    assert store.job(job['id'])['adaptive_batch_size'] == 2
 
 
 async def test_reversed_source_timings_are_reported_before_any_model_call(video, tmp_path):
@@ -589,3 +595,180 @@ async def test_history_cleanup_keeps_descriptor_owned_after_request_cancellation
     assert not work.exists() and not store.jobs()
     with pytest.raises(OSError):
         os.fstat(owned[0])
+
+
+async def test_runtime_limits_apply_to_next_wave_without_losing_checkpoint(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    seen = []
+    async def adapter(config, *args):
+        seen.append((config['concurrency'], config['timeout'], config['retries']))
+        store.save_provider(store.provider(job['provider_id']) | {'concurrency': 3, 'timeout': 240, 'retries': 4})
+        return await deterministic(config, *args)
+    with patch('sillage.jobs.providers.translate', side_effect=adapter):
+        await worker.process(job['id'])
+    assert seen == [(1, 120, 0), (3, 240, 4)]
+    assert len(store.translations(job['id'])) == 2
+    assert store.job(job['id'])['status'] == 'completed'
+
+
+async def test_partial_failed_batch_and_completed_concurrent_sibling_are_saved(video, tmp_path):
+    import asyncio
+    from sillage.providers import StructuredOutputError
+    store, worker, request = environment(video, tmp_path)
+    store.save_provider(store.provider(request['provider_id']) | {'concurrency': 2})
+    job = (await worker.create(request))[0]
+    async def adapter(config, segments, *args):
+        if segments[0]['id'] == 'e000001':
+            error = StructuredOutputError('Synthetic bad cue', 1, {}, 1)
+            raise error
+        await asyncio.sleep(0.02)
+        return await deterministic(config, segments, *args)
+    with patch('sillage.jobs.providers.translate', side_effect=adapter), pytest.raises(StructuredOutputError):
+        await worker.process(job['id'])
+    assert set(store.translations(job['id'])) == {'e000002'}
+    assert store.job(job['id'])['done'] == 1
+
+
+async def test_reconfigure_keeps_checkpoints_and_can_recover_unknown_legacy_settings(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    # Reproduce a pre-snapshot job edited on an older application version.
+    legacy = store.job(job['id'])
+    legacy.pop('provider_snapshot')
+    legacy['config_fingerprint'] = 'unknown-old-config'
+    legacy['status'] = 'error'
+    store.put_job(legacy)
+    store.checkpoint(job['id'], {'e000001': 'Bonjour monde.'})
+    with pytest.raises(ValueError, match='Adapter les paramètres'):
+        worker.job_config(legacy)
+    worker.reconfigure([job['id']], job['provider_id'])
+    assert store.translations(job['id']) == {'e000001': 'Bonjour monde.'}
+    assert store.job(job['id'])['status'] == 'queued'
+    assert any('cohérence' in warning for warning in store.job(job['id'])['warnings'])
+    seen = []
+    async def adapter(config, batch, *args):
+        seen.extend(cue['id'] for cue in batch)
+        return await deterministic(config, batch, *args)
+    with patch('sillage.jobs.providers.translate', side_effect=adapter):
+        await worker.process(job['id'])
+    assert seen == ['e000002']
+    assert store.job(job['id'])['done'] == 2
+
+
+async def test_profile_edits_freeze_matching_legacy_jobs_before_changing_meaning(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    legacy = dict(job)
+    legacy.pop('provider_snapshot')
+    store.put_job(legacy)
+    store.save_provider(store.provider(job['provider_id']) | {'model': 'different'})
+    assert worker.job_config(store.job(job['id']))['model'] == 'test-only'
+
+
+async def test_language_change_requires_explicit_restart_and_never_deletes_other_jobs(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    store.checkpoint(job['id'], {'e000001': 'Bonjour.'})
+    store.patch(job['id'], status='error')
+    store.save_provider(store.provider(job['provider_id']) | {'target_language': 'de'})
+    with pytest.raises(ValueError, match='langues'):
+        worker.reconfigure([job['id']], job['provider_id'])
+    assert store.translations(job['id'])
+    worker.reconfigure([job['id']], job['provider_id'], restart=True)
+    assert store.translations(job['id']) == {}
+    assert store.job(job['id'])['done'] == 0
+    assert worker.job_config(store.job(job['id']))['target_language'] == 'de'
+
+
+async def test_reconfigure_group_is_atomic_and_refuses_actual_active_or_exported_jobs(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    job = (await worker.create(request))[0]
+    before = store.job(job['id'])
+    with pytest.raises(ValueError):
+        worker.reconfigure([job['id'], 'missing'], job['provider_id'], restart=True)
+    assert store.job(job['id']) == before
+    worker.active = job['id']
+    with pytest.raises(ValueError, match='Annulez'):
+        worker.reconfigure([job['id']], job['provider_id'])
+    worker.active = None
+    video.with_suffix('.fr.srt').write_text('keep me')
+    with pytest.raises(ValueError, match='existe déjà'):
+        worker.reconfigure([job['id']], job['provider_id'], restart=True)
+    assert store.job(job['id']) == before
+
+
+async def test_valid_single_cues_grow_back_and_do_not_poison_the_next_episode(video, tmp_path):
+    import shutil
+    store, worker, request = environment(video, tmp_path, batch=20)
+    source = video.with_suffix('.en.srt')
+    source.write_text(''.join(f'{i}\n00:00:01,000 --> 00:00:02,000\nHello {i}\n\n' for i in range(1, 33)))
+    request['items'][0]['track_id'] = f'external:{source.name}'
+    job = (await worker.create(request))[0]
+    store.patch(job['id'], adaptive_batch_size=1, batch_policy={'version': 2, 'size': 1})
+    sizes = []
+    async def adapter(config, batch, *args):
+        sizes.append(len(batch))
+        return await deterministic(config, batch, *args)
+    with patch('sillage.jobs.providers.translate', side_effect=adapter):
+        await worker.process(job['id'])
+    assert sizes[:3] == [1, 1, 1]
+    assert max(sizes) > 4
+    assert len(store.translations(job['id'])) == 32
+    second = video.with_name('next.mkv')
+    shutil.copyfile(video, second)
+    second_source = second.with_suffix('.en.srt')
+    shutil.copyfile(source, second_source)
+    next_job = (await worker.create(request | {'items': [{'path': str(second), 'track_id': f'external:{second_source.name}'}]}))[0]
+    sizes.clear()
+    with patch('sillage.jobs.providers.translate', side_effect=adapter):
+        await worker.process(next_job['id'])
+    assert sizes[0] == 4
+
+
+async def test_real_partial_json_failure_checkpoints_valid_cues_and_resume_requests_only_missing(video, tmp_path):
+    import json
+    import httpx
+    from sillage import providers
+    from test_providers import envelope, output
+    store, worker, request = environment(video, tmp_path, batch=4)
+    store.save_provider(store.provider(request['provider_id']) | {'retries': 1})
+    job = (await worker.create(request))[0]
+    broken = True
+    calls = []
+    def handler(http_request):
+        batch = json.loads(json.loads(http_request.content)['messages'][1]['content'])['segments']
+        calls.append([cue['id'] for cue in batch])
+        valid = [cue for cue in batch if not broken or cue['id'] == 'e000001']
+        return httpx.Response(200, json=envelope(text=output([cue | {'text': cue['text'].replace('Hello', 'Bonjour').replace('Goodbye', 'Au revoir')} for cue in valid])))
+    original = providers.translate
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async def adapter(config, *args):
+            return await original(config, *args, client=client)
+        with patch('sillage.jobs.providers.translate', side_effect=adapter), pytest.raises(providers.StructuredOutputError):
+            await worker.process(job['id'])
+        assert set(store.translations(job['id'])) == {'e000001'}
+        assert store.job(job['id'])['done'] == 1
+        store.patch(job['id'], status='error')
+        store.save_provider(store.provider(job['provider_id']) | {'concurrency': 4, 'timeout': 180})
+        broken = False
+        calls.clear()
+        reopened = Worker(Store(store.folder), worker.library)
+        reopened.resume(job['id'])
+        with patch('sillage.jobs.providers.translate', side_effect=adapter):
+            await reopened.process(job['id'])
+        assert calls == [['e000002']]
+        assert store.job(job['id'])['done'] == store.job(job['id'])['total'] == 2
+
+
+async def test_snapshot_key_never_follows_an_edited_endpoint_and_same_endpoint_rotation_is_used(video, tmp_path):
+    store, worker, request = environment(video, tmp_path)
+    initial = store.provider(request['provider_id'])
+    store.save_provider(initial | {'api_key': 'TEST-ONLY-original-key'})
+    job = (await worker.create(request))[0]
+    store.save_provider(initial | {'api_key': 'TEST-ONLY-rotated-key'})
+    assert worker.job_config(job)['api_key'] == 'TEST-ONLY-rotated-key'
+    store.save_provider(initial | {'base_url': 'http://127.0.0.1:19998/v1', 'api_key': 'TEST-ONLY-other-endpoint'})
+    effective = worker.job_config(job)
+    assert effective['base_url'] == initial['base_url']
+    assert effective['api_key'] == 'TEST-ONLY-original-key'

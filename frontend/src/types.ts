@@ -111,6 +111,7 @@ export type Job = {
   track_id: string;
   source_track?: Track;
   provider_id: string;
+  translation_profile?: Pick<Provider, "name" | "kind" | "model" | "source_language" | "target_language">;
   status: JobStatus;
   progress: number;
   done: number;

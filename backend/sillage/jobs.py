@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import os
 import re
 import shutil
@@ -15,17 +14,13 @@ from subprocess import TimeoutExpired
 
 from . import providers
 from .media import MediaLibrary
-from .storage import Store, now
+from .storage import Store, now, provider_fingerprint as fingerprint
 from .subtitles import SubtitleDocument
 from .sync import propose_sync
 
 ACTIVE = {"queued", "extracting", "translating", "validating", "syncing", "writing"}
+RUNTIME_FIELDS = ("batch_size", "concurrency", "timeout", "retries")
 FINAL = {"completed", "review", "error", "cancelled", "interrupted"}
-
-
-def fingerprint(config: dict) -> str:
-    data = {k: v for k, v in config.items() if k not in {"api_key", "has_key", "id", "name"}}
-    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
 def target_code(config: dict) -> str:
@@ -129,19 +124,74 @@ class Worker:
                    "provider_id": config["id"], "status": "queued", "progress": 0, "done": 0, "total": 0,
                    "error": None, "warnings": [], "output": None, "created_at": now(),
                    "sync_mode": data.get("sync_mode", "preserve"), "offset_ms": offset, "timing_status": "Non vérifiés",
-                   "config_fingerprint": fingerprint(config), "cancel_requested": False, "sync_pending": False}
+                   "config_fingerprint": fingerprint(config), "provider_snapshot": self.store.seal_config(config),
+                   "translation_profile": self.profile_label(config), "cancel_requested": False, "sync_pending": False}
             prepared.append(job)
         # All selection validation precedes insertion. No partial group on a bad item.
         for job in prepared:
             self.store.put_job(job)
         return prepared
 
+    @staticmethod
+    def profile_label(config: dict) -> dict:
+        return {key: config.get(key) for key in ("name", "kind", "model", "source_language", "target_language")}
+
+    def job_config(self, job: dict) -> dict:
+        if job.get("provider_snapshot"):
+            saved = self.store.open_config(job["provider_snapshot"])
+            if not job.get("translation_profile"):
+                self.store.patch(job["id"], translation_profile=self.profile_label(saved))
+        else:
+            saved = self.store.provider(job["provider_id"], secrets=True)
+            if fingerprint(saved) != job["config_fingerprint"] and self.store.translations(job["id"]):
+                raise ValueError("Les anciens paramètres ne sont pas enregistrés. Utilisez Adapter les paramètres dans Traductions pour reprendre sans réanalyser les fichiers.")
+            self.store.patch(job["id"], provider_snapshot=self.store.seal_config(saved),
+                             translation_profile=self.profile_label(saved), config_fingerprint=fingerprint(saved))
+        # Freeze meaning (model/languages/glossary/temperature/endpoint), but allow
+        # operational limits to change between waves without invalidating work.
+        current = next((p for p in self.store.providers(secrets=True) if p["id"] == job["provider_id"]), None)
+        if current:
+            saved.update({key: current[key] for key in RUNTIME_FIELDS})
+            if all(saved.get(key) == current.get(key) for key in ("kind", "base_url")):
+                saved["api_key"] = current["api_key"]  # Same-endpoint key rotation.
+        return providers.ProviderConfig.model_validate(saved).model_dump()
+
+    def reconfigure(self, ids: list[str], provider_id: str, restart: bool = False) -> list[dict]:
+        if not 1 <= len(ids) <= 500 or len(set(ids)) != len(ids):
+            raise ValueError("Sélectionnez entre 1 et 500 traitements distincts.")
+        if self.active in ids or any(jid in self.inflight for jid in ids):
+            raise ValueError("Annulez le traitement et attendez la fin des requêtes en cours avant de l’adapter.")
+        config = self.store.provider(provider_id, secrets=True)
+        code = target_code(config)
+        changes = {}
+        for jid in ids:
+            job = self.store.job(jid)
+            known = self.store.open_config(job["provider_snapshot"]) if job.get("provider_snapshot") else None
+            translated = self.store.translations(jid)
+            if translated and not restart and known and (target_code(known) != code or known["source_language"].casefold() != config["source_language"].casefold()):
+                raise ValueError("Les langues ont changé. Choisissez Recommencer la traduction pour éviter de mélanger les langues.")
+            path = self.library.resolve(job["path"])
+            if any(path.with_suffix(f".{code}.{ext}").exists() or path.with_suffix(f".{code}.{ext}").is_symlink() for ext in ("ass", "ssa", "srt")):
+                raise ValueError("Un sous-titre cible existe déjà. Aucun export n’est remplacé.")
+            warnings = list(job.get("warnings", []))
+            if translated and not restart and (not known or fingerprint({k: v for k, v in known.items() if k not in RUNTIME_FIELDS}) != fingerprint({k: v for k, v in config.items() if k not in RUNTIME_FIELDS})):
+                warning = "Reprise avec les paramètres actuels confirmée : les segments déjà validés ont été conservés ; vérifiez la cohérence de la traduction."
+                if warning not in warnings:
+                    warnings.append(warning)
+            changes[jid] = {"provider_id": provider_id, "provider_snapshot": self.store.seal_config(config),
+                            "translation_profile": self.profile_label(config), "config_fingerprint": fingerprint(config),
+                            "status": "queued", "error": None, "cancel_requested": False, "sync_pending": False,
+                            "sync_proposal": None, "write_hash": None, "batch_policy": {},
+                            "adaptive_batch_size": providers.initial_batch_size(config), "warnings": [] if restart else warnings}
+            if restart:
+                changes[jid].update(done=0, progress=0, usage={})
+        self.store.reconfigure_jobs(changes, restart)
+        return [self.store.job(jid) for jid in ids]
+
     async def process(self, jid: str):
         job = self.store.job(jid)
         self.check_cancel(jid)
-        config = self.store.provider(job["provider_id"], secrets=True)
-        if fingerprint(config) != job["config_fingerprint"]:
-            raise ValueError("La configuration du provider a changé. Créez un nouveau traitement pour éviter de mélanger les traductions.")
+        config = self.job_config(job)
         work = self.store.folder / "work" / jid
         work.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.store.patch(jid, status="extracting", progress=max(2, job["progress"]), error=None)
@@ -159,17 +209,13 @@ class Worker:
         doc.validate_translations(translations, require_all=False)
         pending = [s for s in doc.segments if s["id"] not in translations]
         total = len(doc.segments)
-        # Reuse only empirical ceilings from this exact profile/configuration.
-        # Operational feedback stays in job metadata, never in provider secrets.
-        limit = providers.initial_batch_size(config)
-        history = [entry for entry in self.store.jobs()
-                   if entry["provider_id"] == job["provider_id"]
-                   and entry["config_fingerprint"] == job["config_fingerprint"]][:20]
-        for entry in history:
-            learned = entry.get("adaptive_batch_size")
-            if isinstance(learned, int) and 1 <= learned <= 100:
-                limit = min(limit, learned)
-        self.store.patch(jid, adaptive_batch_size=limit)
+        # Old per-profile minima are deliberately retired. A difficult cue is
+        # evidence about that cue, not every episode/model request forever.
+        initial = providers.initial_batch_size(config)
+        state = job.get("batch_policy", {})
+        limit = min(config["batch_size"], max(1, state.get("size", initial))) if state.get("version") == 2 else initial
+        streak = 0
+        self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 2, "size": limit})
         positions = {segment["id"]: index for index, segment in enumerate(doc.segments)}
 
         async def translate_batch(batch):
@@ -189,6 +235,8 @@ class Worker:
         # episode-wide batch list would ignore the model's recovered smaller size.
         while pending:
             self.check_cancel(jid)
+            config = self.job_config(self.store.job(jid))
+            limit = min(limit, config["batch_size"])
             self.store.patch(jid, status="translating", progress=5 + int(80 * len(translations) / max(total, 1)), done=len(translations))
             group = []
             for _ in range(config["concurrency"]):
@@ -199,31 +247,48 @@ class Worker:
                 pending = pending[len(batch):]
             tasks = [asyncio.create_task(translate_batch(batch)) for batch in group]
             self.inflight[jid] = tasks
+            failure = None
+            reduced = None
+            full_success = False
             try:
                 for completed in asyncio.as_completed(tasks):
                     try:
                         result = await completed
-                    except providers.StructuredOutputError as error:
-                        limit = min(limit, error.batch_size)
+                    except providers.ProviderError as error:
+                        # A broken cue must not discard valid siblings/descendants.
+                        partial = getattr(error, "translations", {})
+                        candidate = translations | partial
+                        doc.validate_translations(candidate, require_all=False)
+                        self.store.checkpoint(jid, partial)
+                        translations = candidate
                         record_usage(error.usage)
                         warnings.extend(w for w in error.warnings if w not in warnings)
-                        self.store.patch(jid, adaptive_batch_size=limit, warnings=warnings)
-                        raise
-                    except providers.ProviderError as error:
-                        warnings.extend(w for w in error.warnings if w not in warnings)
-                        self.store.patch(jid, warnings=warnings)
-                        raise
+                        failure = failure or error
+                        self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(total,1)), warnings=warnings)
+                        continue
                     candidate = translations | result["translations"]
                     doc.validate_translations(candidate, require_all=False)
                     self.store.checkpoint(jid, result["translations"])
                     translations = candidate
                     if result.get("recovered"):
-                        limit = min(limit, result["batch_size"])
+                        suggested = max(1, result["batch_size"])
+                        reduced = min(reduced or limit, suggested)
+                    else:
+                        full_success = full_success or len(result["translations"]) >= limit
                     warnings.extend(w for w in result.get("warnings", []) if w not in warnings)
                     record_usage(result.get("usage", {}))
-                    self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(total,1)),
-                                     adaptive_batch_size=limit, warnings=warnings)
+                    self.store.patch(jid, done=len(translations), progress=5+int(80*len(translations)/max(total,1)), warnings=warnings)
                     self.check_cancel(jid)
+                if reduced is not None:
+                    limit, streak = min(limit, reduced), 0
+                elif full_success:
+                    streak += 1
+                    if streak >= 3:
+                        limit = min(config["batch_size"], max(limit+1, (limit*3+1)//2))
+                        streak = 0
+                self.store.patch(jid, adaptive_batch_size=limit, batch_policy={"version": 2, "size": limit})
+                if failure:
+                    raise failure
             except asyncio.CancelledError:
                 self.check_cancel(jid)  # User cancellation must not stop the queue loop.
                 raise
@@ -263,9 +328,7 @@ class Worker:
         if hashlib.sha256(source.read_bytes()).hexdigest() != job["source_hash"]:
             raise ValueError("Checkpoint source modifié. Export refusé.")
         doc = SubtitleDocument.load(source)
-        config = self.store.provider(job["provider_id"], secrets=True)
-        if fingerprint(config) != job["config_fingerprint"]:
-            raise ValueError("La configuration du provider a changé avant l’export. Créez un nouveau traitement.")
+        config = self.job_config(job)
         with tempfile.TemporaryDirectory(prefix="sillage-recheck-") as directory:
             current, info = await asyncio.to_thread(self.library.extract, job["path"], job["track_id"], Path(directory))
             if hashlib.sha256(current.read_bytes()).hexdigest() != job["source_hash"]:
@@ -276,7 +339,6 @@ class Worker:
         content = doc.render(translations, offset_ms=offset)
         self.check_cancel(jid)
         self.store.patch(jid, status="writing", progress=96)
-        config = self.store.provider(job["provider_id"], secrets=True)
         suffix = f".{target_code(config)}.{doc.format}"
         expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         path = self.library.resolve(job["path"]).with_suffix(suffix)

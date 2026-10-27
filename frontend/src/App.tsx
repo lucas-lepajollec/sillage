@@ -291,6 +291,7 @@ export default function App() {
           }
           {page === "translations" && (
             <Translations
+              providers={providers.data || []}
               jobs={jobs.data || []}
               loading={jobs.isPending}
               error={jobs.error}

@@ -131,3 +131,34 @@ def test_history_deletion_requires_auth_and_rejects_extra_fields(video, tmp_path
     with TestClient(create_app(tmp_path / "config", [video.parent], run_worker=False)) as client:
         assert client.post("/api/jobs/delete", json={"ids": ["a" * 32]}).status_code == 401
         assert client.post("/api/jobs/delete", json={"ids": ["a" * 32], "delete_exports": True}, headers={"X-Access-Key": "TEST-ONLY-access-key"}).status_code == 422
+
+
+def test_job_snapshots_are_encrypted_and_private_and_reconfigure_recovers_in_place(video, tmp_path):
+    app = create_app(tmp_path / 'config', [video.parent], run_worker=False)
+    secret = 'TEST-ONLY-snapshot-secret'
+    with TestClient(app) as client:
+        provider = client.post('/api/providers', json={'kind': 'custom', 'model': 'test', 'api_key': secret,
+            'base_url': 'http://127.0.0.1:19999/v1'}).json()
+        track = app.state.library.inspect(video)['tracks'][0]['id']
+        job = client.post('/api/jobs', json={'items': [{'path': str(video), 'track_id': track}], 'provider_id': provider['id']}).json()[0]
+        assert 'provider_snapshot' not in job
+        assert 'config_fingerprint' not in job
+        assert 'api_key' not in str(job)
+        assert job['translation_profile']['model'] == 'test'
+        raw = app.state.store.job(job['id'])
+        assert secret not in str(raw)
+        assert app.state.store.open_config(raw['provider_snapshot'])['api_key'] == secret
+        assert secret.encode() not in app.state.store.path.read_bytes()
+        app.state.store.patch(job['id'], status='error')
+        app.state.store.checkpoint(job['id'], {'e000001': 'Bonjour.'})
+        client.post('/api/providers', json=provider | {'model': 'new-model', 'concurrency': 3})
+        resumed = client.post('/api/jobs/reconfigure', json={'ids': [job['id']], 'provider_id': provider['id']})
+        assert resumed.status_code == 200
+        assert resumed.json()[0]['translation_profile']['model'] == 'new-model'
+        assert resumed.json()[0]['status'] == 'queued'
+        assert 'provider_snapshot' not in resumed.text and secret not in resumed.text
+        assert app.state.store.translations(job['id']) == {'e000001': 'Bonjour.'}
+        assert len(client.get('/api/jobs').json()) == 1
+        assert 'provider_snapshot' not in client.get('/api/jobs').text
+        assert client.post('/api/jobs/reconfigure', json={'ids': [job['id']], 'provider_id': provider['id'], 'restart': True}).status_code == 200
+        assert app.state.store.translations(job['id']) == {}

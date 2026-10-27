@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.7 — 2026-10-27
+
+- Replace permanent profile-wide batch minima with per-job recovery and gradual growth after three successful full waves. Ignore historical size-1 learning; isolated difficult cues no longer slow every episode.
+- Request compact explicit-ID JSON maps, normalize equivalent maps/arrays and retain individually validated cues from complete responses. Retry only invalid/missing cues and preserve completed concurrent siblings on failure; keep strict formatting/timing/export validation and bounded recovery calls.
+- Snapshot translation settings and credentials encrypted per job. Apply current execution limits at the next wave without invalidating checkpoints; keep each job's model/languages/endpoint stable through profile edits and finalization.
+- Add individual/scoped in-place parameter adoption from Traductions, with explicit keep-progress or restart choices. Recover already-edited legacy jobs without deleting entries or rediscovering files; protect active work, language changes and existing exports with atomic group validation.
+
 ## 0.0.6 — 2026-10-27
 
 - Add a default folder view for translation history, grouped by exact source directory with counts, searchable/status-filtered cards and pagination. Keep a remembered List alternative.

@@ -105,3 +105,44 @@ test("mobile reanalysis prepares one real source without starting a generation",
   await expect(page.locator(".reanalysis-notice")).toHaveCount(0);
   expect(generations).toBe(0);
 });
+
+for (const mobile of [false, true]) {
+  test(`adapt one or scoped stopped translations without explorer ${mobile ? "mobile" : "desktop"}`, async ({ page }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+    const records = history();
+    const profiles = [{ id: "test-only", name: "Cloud", model: "model-current", kind: "custom" }];
+    const requests: { ids: string[]; provider_id: string; restart: boolean }[] = [];
+    let scans = 0;
+    await page.route("**/api/providers", (route) => route.fulfill({ json: profiles }));
+    await page.route("**/api/jobs", (route) => route.fulfill({ json: records }));
+    await page.route("**/api/scan", (route) => { scans++; return route.fulfill({ json: { episodes: [], errors: [] } }); });
+    await page.route("**/api/jobs/reconfigure", async (route) => {
+      requests.push(route.request().postDataJSON());
+      if (requests.length === 1) return route.fulfill({ status: 400, json: { detail: "Annulez le traitement actif avant de l’adapter." } });
+      return route.fulfill({ json: records.filter((job) => requests.at(-1)!.ids.includes(job.id)) });
+    });
+    await page.goto("/#traductions");
+    await page.getByLabel("Rechercher une traduction", { exact: true }).fill("Serie 02");
+    await page.locator(".job-folder-card").click();
+    await page.getByRole("button", { name: "Adapter les paramètres (1)", exact: true }).click();
+    const modal = page.getByRole("dialog", { name: "Adapter les paramètres", exact: true });
+    await expect(modal.getByLabel("Conserver les segments validés", { exact: true })).toBeChecked();
+    await expect(modal.getByLabel("Profil pour la reprise", { exact: true })).toHaveValue("test-only");
+    await expect(modal).toContainText("même piste source, sans nouvelle analyse");
+    await modal.getByRole("button", { name: "Confirmer et reprendre", exact: true }).click();
+    await expect(modal).toContainText("Annulez le traitement actif");
+    expect(requests[0]).toEqual({ ids: [String(2).padStart(32, "0")], provider_id: "test-only", restart: false });
+    if (mobile) expect(await modal.getByLabel("Profil pour la reprise", { exact: true }).evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+    await page.screenshot({ path: `test-results/recovery-settings-${mobile ? "mobile" : "desktop"}.png`, fullPage: true, animations: "disabled" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await modal.getByLabel("Recommencer la traduction", { exact: true }).check();
+    await expect(modal).toContainText("seront effacés et retraduits");
+    await modal.getByRole("button", { name: "Confirmer et recommencer", exact: true }).click();
+    await expect(modal).not.toBeVisible();
+    expect(requests[1].restart).toBe(true);
+    await page.getByRole("button", { name: "Adapter les paramètres de Épisode 01.mkv", exact: true }).click();
+    await expect(modal.getByLabel("Conserver les segments validés", { exact: true })).toBeChecked();
+    await modal.getByLabel("Fermer", { exact: true }).click();
+    expect(scans).toBe(0);
+  });
+}
