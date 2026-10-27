@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.12 — 2026-10-27
+
+- Center the sidebar logo/name as one row, with the descriptor centered beneath it, across desktop, tablet and mobile widths. Consolidate the competing brand overrides.
+- Exclude environment variants, private key containers and database artifacts from Git/build contexts; extend the existing documentation/privacy checks.
+- Integrate the reviewed Dependabot updates for lucide-react, pinned Node/login actions and ffsubsync0.5.1. Keep the lockfile compatible with the pinned uv0.9.5 builder and retain the conservative audio-only synchronization contract.
+
 ## 0.0.11 — 2026-10-27
 
 - Pause an episode or the current folder/search/filter selection across pages, and resume paused work. Keep queued pauses durable across restarts; let current HTTP replies finish and checkpoint validated cues/fragments before stopping, without launching new generation or recovery calls. Keep cancellation separate and refuse pause once publication has begun.

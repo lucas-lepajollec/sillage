@@ -285,12 +285,20 @@ code {
 }
 .brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 11px;
-  padding: 0 11px 37px;
+  gap: 8px;
+  padding: 0 0 37px;
+  text-align: center;
   color: var(--accent);
 }
-.brand > span {
+.brand-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.brand-heading > svg { flex-shrink: 0; }
+.brand-name {
   font-size: 23px;
   font-weight: 570;
   letter-spacing: -0.9px;
@@ -299,11 +307,11 @@ code {
 }
 .brand-sub {
   display: block;
-  font-size: 11px;
-  letter-spacing: 1.55px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  white-space: nowrap;
   color: var(--muted);
   font-weight: 500;
-  margin-top: 8px;
 }
 .sidebar-label {
   font-size: 11px;
@@ -2874,15 +2882,10 @@ main {
     padding-right: 12px;
   }
   .brand {
-    padding-left: 8px;
     gap: 8px;
   }
-  .brand > span {
+  .brand-name {
     font-size: 22px;
-  }
-  .brand-sub {
-    font-size: 11px;
-    letter-spacing: 1.3px;
   }
   .workspace {
     margin-left: 195px;
@@ -3048,11 +3051,8 @@ main {
     justify-content: flex-start;
     gap: 16px;
   }
-  .brand > span {
+  .brand-name {
     font-size: 23px;
-  }
-  .brand-sub {
-    font-size: 11px;
   }
   .nav-link {
     font-size: 13px;
@@ -3713,14 +3713,6 @@ main {
 }
 
 /* Readability refinements verified at desktop and phone widths. */
-.brand-sub {
-  font-size: 9px;
-  letter-spacing: 1px;
-  white-space: nowrap;
-}
-.brand {
-  gap: 9px;
-}
 .job-stages {
   flex-wrap: wrap;
   row-gap: 8px;
