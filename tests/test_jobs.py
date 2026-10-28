@@ -94,9 +94,9 @@ def environment(video, tmp_path, batch=1):
     return store, worker, request
 
 
-@pytest.mark.parametrize("ass", [False, True])
-async def test_real_pipeline_preserves_mkv_and_timestamps(media_factory, tmp_path, ass):
-    video = media_factory(ass=ass)
+@pytest.mark.parametrize("ass,actor_alias", [(False, False), (True, False), (True, True)])
+async def test_real_pipeline_preserves_mkv_and_timestamps(media_factory, tmp_path, ass, actor_alias):
+    video = media_factory(ass=ass, actor_alias=actor_alias)
     store, worker, request = environment(video, tmp_path)
     mkv_hash = hashlib.sha256(video.read_bytes()).hexdigest()
     job = (await worker.create(request))[0]
@@ -109,6 +109,9 @@ async def test_real_pipeline_preserves_mkv_and_timestamps(media_factory, tmp_pat
     assert "Bonjour" in Path(result["output"]).read_text()
     source = SubtitleDocument.load(result["source_file"])
     output = SubtitleDocument.load(result["output"])
+    if actor_alias:
+        assert "Style, Actor, MarginL" in source.original
+        assert "Style, Actor, MarginL" in output.original
     assert [(c["start"], c["end"]) for c in source.cues] == [(c["start"], c["end"]) for c in output.cues]
     assert "audio non vérifié" in result["timing_status"]
     assert hashlib.sha256(video.read_bytes()).hexdigest() == mkv_hash
