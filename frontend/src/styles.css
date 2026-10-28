@@ -286,18 +286,18 @@ code {
 .brand {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 0 0 37px;
-  text-align: center;
+  padding: 0 12px 37px;
+  text-align: left;
   color: var(--accent);
 }
 .brand-heading {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
 }
-.brand-heading > svg { flex-shrink: 0; }
+.brand-heading > svg { flex-shrink: 0; width: 22px; }
 .brand-name {
   font-size: 23px;
   font-weight: 570;

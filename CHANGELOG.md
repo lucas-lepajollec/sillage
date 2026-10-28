@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.0.14 — 2026-10-28
+
+- Align the sidebar logo with navigation icons, the Sillage title with navigation labels, and the descriptor with the shared left margin. Preserve these alignments in the mobile drawer.
+
 ## 0.0.13 — 2026-10-28
 
 - Accept the libass `Actor` alias for the ASS/SSA Events `Name` column. Previously these valid tracks failed before translation with a column-order error. Retain exact headers, actor names, comments, formatting and source timings; keep rejecting reordered, duplicate or extra columns.
