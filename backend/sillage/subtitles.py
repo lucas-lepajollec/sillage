@@ -319,7 +319,10 @@ class SubtitleDocument:
                 continue
             if stripped.startswith("Format:"):
                 fields = [x.strip().casefold() for x in stripped[7:].split(",")]
-                if fields != expected:
+                # libass accepts Actor as an alias for Name. Compare canonical
+                # names only; retain the original header and positional guards.
+                canonical_fields = ["name" if field == "actor" else field for field in fields]
+                if canonical_fields != expected:
                     raise ValueError("Ordre de colonnes ASS/SSA non standard : vérification requise.")
                 continue
             match = re.match(r"(?P<kind>Dialogue|Comment):[ \t]*(?P<data>.*)$", line)

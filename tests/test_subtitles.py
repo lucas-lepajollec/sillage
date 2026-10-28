@@ -168,6 +168,36 @@ def test_ssa_marked_field_is_preserved():
     assert doc.render({"e000001": "Bonjour."}) == text.replace("Hello.", "Bonjour.")
 
 
+@pytest.mark.parametrize("format_,first", [("ass", "Layer"), ("ssa", "Marked")])
+@pytest.mark.parametrize("actor", ["Actor", "actor", "ACTOR"])
+def test_actor_column_alias_preserves_header_metadata_and_text_boundaries(format_, first, actor):
+    text = ("\ufeff[Script Info]\r\nScriptType: v4.00" + ("+" if format_ == "ass" else "") + "\r\n"
+            "[Events]\r\n"
+            f"Format: {first}, Start, End, Style, {actor}, MarginL, MarginR, MarginV, Effect, Text\r\n"
+            "Dialogue: 0, 0:00:01.20 , 0:00:03.00 ,Default,Hello.,10,20,30,,Hello, world.\r\n"
+            "Comment: 0,0:00:01.20,0:00:03.00,Default,Editor,10,20,30,,Keep this note.\r\n")
+    doc = SubtitleDocument(text, format_)
+    assert doc.render({}) == text
+    assert doc.stats == {"events": 2, "translatable": 1, "preserved": 1}
+    assert doc.segments == [{"id": "e000001", "text": "Hello, world."}]
+    translated = doc.render({"e000001": "Bonjour, le monde."})
+    assert translated == text.replace(",,Hello, world.", ",,Bonjour, le monde.")
+    shifted = doc.render({"e000001": "Bonjour, le monde."}, offset_ms=120)
+    assert shifted == translated.replace("0:00:01.20", "0:00:01.32").replace("0:00:03.00", "0:00:03.12")
+
+
+@pytest.mark.parametrize("columns", [
+    "Layer, Start, End, Actor, Style, MarginL, MarginR, MarginV, Effect, Text",
+    "Layer, Start, End, Actor, Name, MarginL, MarginR, MarginV, Effect, Text",
+    "Layer, Start, End, Style, Name, Actor, MarginL, MarginR, MarginV, Effect, Text",
+    "Layer, Start, End, Style, Actor, MarginL, MarginR, MarginV, Text, Effect",
+])
+def test_actor_alias_does_not_accept_reordered_duplicate_or_extra_columns(columns):
+    with pytest.raises(ValueError, match="colonnes ASS/SSA"):
+        SubtitleDocument(f"[Events]\nFormat: {columns}\n"
+                         "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello.\n", "ass")
+
+
 @pytest.mark.parametrize("text", ["x" * 131073, "{unclosed", "a\x00b", "a\rb", "a\nb", "{" + r"\p1" * 4097 + "}"])
 def test_bounded_lexer_rejects_ambiguous_or_excessive_events(text):
     with pytest.raises(ASSNeedsReviewError):

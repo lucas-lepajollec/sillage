@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.0.13 — 2026-10-28
+
+- Accept the libass `Actor` alias for the ASS/SSA Events `Name` column. Previously these valid tracks failed before translation with a column-order error. Retain exact headers, actor names, comments, formatting and source timings; keep rejecting reordered, duplicate or extra columns.
+- Cover the alias with lossless ASS/SSA parsing and offset regressions and an embedded-MKV extraction → translation → sidecar test. Existing jobs blocked by this alias can be resumed after updating, without deleting or rescanning them.
+
 ## 0.0.12 — 2026-10-27
 
 - Center the sidebar logo/name as one row, with the descriptor centered beneath it, across desktop, tablet and mobile widths. Consolidate the competing brand overrides.

@@ -20,13 +20,13 @@ Dialogue: 1,0:00:02.50,0:00:04.50,Sign,,0,0,0,,{\pos(100,120)\an7}Station
 @pytest.fixture(scope="session")
 def media_factory(tmp_path_factory):
     base = tmp_path_factory.mktemp("generated-media")
-    def create(name="Episode 01.mkv", *, ass=False, multiple=False, no_subs=False):
+    def create(name="Episode 01.mkv", *, ass=False, actor_alias=False, multiple=False, no_subs=False):
         folder = base / str(len(list(base.iterdir())))
         folder.mkdir()
         srt = folder / "source.en.srt"
         srt.write_text(SRT, encoding="utf-8")
         ass_file = folder / "source.en.ass"
-        ass_file.write_text(ASS, encoding="utf-8")
+        ass_file.write_text(ASS.replace("Style, Name, MarginL", "Style, Actor, MarginL") if actor_alias else ASS, encoding="utf-8")
         output = folder / name
         args = ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=size=64x36:rate=2:duration=6",
                 "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono"]

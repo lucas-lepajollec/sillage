@@ -1,6 +1,6 @@
 [project]
 name = "sillage"
-version = "0.0.12"
+version = "0.0.13"
 description = "Safe, focused translation of embedded subtitles for a personal media library"
 requires-python = ">=3.12"
 license = "GPL-3.0-only"
