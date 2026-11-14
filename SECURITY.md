@@ -6,7 +6,7 @@ Report vulnerabilities privately through [GitHub security advisories](https://gi
 
 ## Boundaries
 
-- Media roots confine navigation and processing; MKVs are read-only to application logic. Sidecar publication is atomic and exclusive.
+- Media roots confine navigation and processing; MKV and MP4 files are read-only to application logic. Sidecar publication is atomic and exclusive.
 - Provider keys are encrypted with a separate key under /config. Administrators who can read both can decrypt them. Keep the entire config directory and backups private.
 - Translation sends subtitle text/context/glossary to the selected provider. HTTP LAN endpoints are supported; choose HTTPS or a trusted network when confidentiality matters.
 - Compose publishes port 2511 on host interfaces, as a normal self-hosted service. Use trusted networks and a firewall. For broader exposure, configure ACCESS_KEY, HTTPS and a reverse proxy. See [Docker operations](docs/docker.md).

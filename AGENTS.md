@@ -1,10 +1,10 @@
 # Sillage maintainer instructions
 
-Sillage is a focused, self-hosted subtitle translation studio: browse mounted media, select MKV tracks, translate text, validate and publish external sidecars. French UI; English public documentation.
+Sillage is a focused, self-hosted subtitle translation studio: browse mounted media, select MKV/MP4 tracks, translate text, validate and publish external sidecars. French UI; English public documentation.
 
 ## Preserve media and translation boundaries
 
-- Never write, remux or re-encode source MKVs or source sidecars.
+- Never write, remux or re-encode source MKV/MP4 files or source sidecars.
 - Confine every media path to configured canonical roots; subprocesses use argument lists, never interpolated shell strings.
 - LLMs receive stable IDs and protected text only. Validate complete IDs, placeholders, event structure and timestamps before publishing.
 - Preserve source timing by default. Explicit synchronization must remain separate, guarded and reviewable.

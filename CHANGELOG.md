@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.0.15 — 2026-11-14
+
+- Accept MKV and MP4 files throughout browsing, recursive scans, source-track previews, translation and external exports, including uppercase extensions and matching ASS/SSA/SRT sidecars.
+- Decode embedded MP4 timed text (`mov_text`) into SRT before translation. Export `Episode.fr.srt` while preserving cue timings at SRT millisecond precision and leaving the source video unchanged. Identify the conversion in source-track labels; MP4-specific styling/positioning is not guaranteed. Burned-in and bitmap subtitles still require OCR outside Sillage.
+- Keep existing MKV ASS/SSA/SubRip stream-copy extraction, filesystem confinement, checkpoints and exclusive output publication. No settings or database migration.
+
 ## 0.0.14 — 2026-10-28
 
 - Align the sidebar logo with navigation icons, the Sillage title with navigation labels, and the descriptor with the shared left margin. Preserve these alignments in the mobile drawer.

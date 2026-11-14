@@ -1,6 +1,6 @@
 """Test-only real API fixture. Never imported by the production application.
 
-Creates tiny MKVs and a deterministic HTTP provider, then runs Sillage against
+Creates tiny MKVs/MP4s and a deterministic HTTP provider, then runs Sillage against
 that disposable library. Nothing is mounted from the user's media collection.
 """
 from __future__ import annotations
@@ -72,6 +72,17 @@ def create_library(root: Path):
         subtitle.unlink()
         if number == 3:
             output.with_suffix(".fr.ass").write_text(ASS.replace("Hello", "Bonjour").replace("Goodbye", "Au revoir").replace("Station", "Gare"))
+    mp4_folder = root / "MP4"
+    mp4_folder.mkdir()
+    subtitle = mp4_folder / "source.srt"
+    subtitle.write_text(SRT, encoding="utf-8")
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=size=64x36:rate=2:duration=6",
+        "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-i", str(subtitle),
+        "-map", "0:v", "-map", "1:a", "-map", "2:0", "-t", "6", "-c:v", "mpeg4", "-c:a", "aac",
+        "-c:s", "mov_text", "-metadata:s:s:0", "language=eng", str(mp4_folder / "Perfect Run 星.MP4"),
+    ], check=True, capture_output=True)
+    subtitle.unlink()
     return root
 
 

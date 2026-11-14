@@ -657,7 +657,7 @@ export function Explorer({
               <ScanLine size={30} />
             </div>
             <h3>Lecture des pistes de sous-titres</h3>
-            <p>Les MKV sont inspectés, sans extraction ni modification.</p>
+            <p>Les MKV et MP4 sont inspectés, sans extraction ni modification.</p>
             <div className="skeleton-rows">
               {[0, 1, 2].map((i) => (
                 <div key={i}>
@@ -694,7 +694,7 @@ export function Explorer({
                   onClick={() => scan.mutate({ path: currentPath, recursive })}
                 >
                   <ScanLine size={15} />
-                  Analyser les fichiers MKV
+                  Analyser les fichiers MKV et MP4
                   <ArrowRight size={14} />
                 </Button>
               }
@@ -836,7 +836,7 @@ export function Explorer({
             {episodes.length === 0 ? (
               <Empty
                 icon={<FileVideo2 size={28} />}
-                title="Aucun épisode MKV trouvé"
+                title="Aucun épisode MKV ou MP4 trouvé"
               >
                 Vérifiez ce dossier et l’option « Sous-dossiers inclus », puis
                 relancez le scan.
@@ -960,7 +960,7 @@ export function Explorer({
         </span>
         <span>
           <Subtitles size={14} />
-          Export .fr.ass ou .fr.srt à côté du MKV.
+          Export .fr.ass ou .fr.srt à côté du MKV ou MP4.
         </span>
       </div>
       {selected.length > 0 && (

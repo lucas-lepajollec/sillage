@@ -208,3 +208,34 @@ test("mobile layout, navigation, filters, empty and source drawer", async ({
     ),
   ).toBe(true);
 });
+
+test("MP4 timed text → source preview → French SRT download", async ({ page, request }) => {
+  const response = await request.post("/api/providers", { data: {
+    kind: "custom", name: "MP4 test HTTP", model: "sillage-test-only",
+    base_url: "http://127.0.0.1:5777/v1", source_language: "en", target_language: "fr",
+  } });
+  expect(response.ok()).toBeTruthy();
+  const provider = await response.json();
+  await page.goto("/");
+  await page.getByRole("button", { name: "MP4", exact: true }).last().click();
+  await page.getByTestId("scan-button").click();
+  await expect(page.getByText("1 épisode", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Détails de Perfect Run 星.MP4", exact: true }).click();
+  await expect(page.getByRole("dialog").locator(".cue-source").first()).toContainText("Hello world!");
+  await expect(page.getByRole("dialog")).toContainText("Texte MP4 → SRT");
+  await page.getByRole("button", { name: "Fermer l’aperçu", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Sélectionner Perfect Run 星.MP4", exact: true }).check();
+  await page.getByLabel("TRADUIRE AVEC", { exact: true }).selectOption(provider.id);
+  await page.getByRole("button", { name: "Traduire", exact: true }).click();
+  await page.getByRole("button", { name: "Liste", exact: true }).click();
+  const card = page.locator(".job-card").filter({ hasText: "Perfect Run 星.MP4" });
+  await expect(card).toHaveClass(/job-review/, { timeout: 30_000 });
+  await expect(card.locator(".job-source-track").first()).toContainText("Texte MP4 → SRT");
+  const downloading = page.waitForEvent("download");
+  await card.getByRole("button", { name: "Télécharger", exact: true }).click();
+  expect((await downloading).suggestedFilename()).toBe("Perfect Run 星.fr.srt");
+  // Keep this shared fixture's history independent of the other real workflow.
+  const jobs = await (await request.get("/api/jobs")).json();
+  const job = jobs.find((item: { path: string }) => item.path.endsWith("Perfect Run 星.MP4"));
+  await request.post("/api/jobs/delete", { data: { ids: [job.id] } });
+});

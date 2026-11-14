@@ -33,7 +33,7 @@ The worker defaults to UID/GID 1000. The entrypoint runs briefly as root, create
 
 The mounted media directory needs read permission for videos/subtitles and write permission on parent folders for sidecars. Fix host ACLs or group membership if export fails. Do not work around permissions by running the worker as root. When changing UID/GID on an existing config, adjust that config's ownership explicitly on the host first. An advanced `user: "UID:GID"` override is possible when directories are already writable.
 
-The media directory is intentionally mounted read/write for exports; MKVs are never written by the application. Keep host administrators and filesystem writers trusted. Docker socket, privileged mode, host networking and GPU access are not required.
+The media directory is intentionally mounted read/write for exports; MKV and MP4 files are never written by the application. Keep host administrators and filesystem writers trusted. Docker socket, privileged mode, host networking and GPU access are not required.
 
 ## Network access
 

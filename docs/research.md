@@ -14,6 +14,6 @@
 
 ## Périmètre construit
 
-Un backend FastAPI sert les assets compilés et pilote un worker unique. SQLite conserve providers, jobs et checkpoints par segment. Le worker ne reçoit jamais de texte ASS complet en retour du modèle : IDs et placeholders contrôlent une reconstruction déterministe. Un résultat est validé avant publication atomique exclusive à côté du MKV.
+Un backend FastAPI sert les assets compilés et pilote un worker unique. SQLite conserve providers, jobs et checkpoints par segment. Le worker ne reçoit jamais de texte ASS complet en retour du modèle : IDs et placeholders contrôlent une reconstruction déterministe. Un résultat est validé avant publication atomique exclusive à côté du MKV ou MP4.
 
 Le système reste un outil personnel local, sans serveur Node en production, sans Redis/Celery et sans service de médiathèque tiers obligatoire. Les phases de synchronisation et de traduction restent distinctes. Les garanties observées et les limites non testées sont consignées dans [STATUS](STATUS.md).
