@@ -7,20 +7,22 @@ import pytest
 from sillage.media import MediaLibrary
 
 
-def test_real_srt_and_ass_inspection_and_extraction(media_factory, tmp_path):
-    for ass in [False, True]:
-        video = media_factory(ass=ass)
-        library = MediaLibrary([video.parent])
-        before = hashlib.sha256(video.read_bytes()).hexdigest()
-        info = library.inspect(video)
-        assert info["status"] == "ready"
-        assert info["duration"] == 6
-        assert info["tracks"][0]["format"] == ("ass" if ass else "srt")
-        work = tmp_path / str(ass)
-        work.mkdir()
-        source, _ = library.extract(video, info["tracks"][0]["id"], work)
-        assert "Hello" in source.read_text()
-        assert hashlib.sha256(video.read_bytes()).hexdigest() == before
+@pytest.mark.parametrize("name,ass", [("Episode.mkv", False), ("Episode.mkv", True), ("Perfect Run.MP4", False)])
+def test_real_srt_and_ass_inspection_and_extraction(media_factory, tmp_path, name, ass):
+    video = media_factory(name, ass=ass)
+    library = MediaLibrary([video.parent])
+    before = hashlib.sha256(video.read_bytes()).hexdigest()
+    info = library.inspect(video)
+    assert info["status"] == "ready"
+    assert info["duration"] == 6
+    assert info["tracks"][0]["format"] == ("ass" if ass else "srt")
+    work = tmp_path / str(ass)
+    work.mkdir()
+    source, _ = library.extract(video, info["tracks"][0]["id"], work)
+    assert "Hello" in source.read_text()
+    from sillage.subtitles import SubtitleDocument
+    assert [(cue["start"], cue["end"]) for cue in SubtitleDocument.load(source).cues] == [(500, 2000), (2500, 4500)]
+    assert hashlib.sha256(video.read_bytes()).hexdigest() == before
 
 
 def test_multiple_english_and_sdh(media_factory):
@@ -41,7 +43,9 @@ def test_no_english_and_graphic_tracks_are_not_selectable(video):
     assert not any(t["supported"] for t in info["tracks"])
 
 
-def test_external_sources_and_french_detection(video):
+@pytest.mark.parametrize("name", ["Episode.mkv", "Episode.mp4"])
+def test_external_sources_and_french_detection(media_factory, name):
+    video = media_factory(name)
     french = video.with_suffix(".fr.ass")
     french.write_text("test")
     english = video.with_suffix(".en.srt")
@@ -65,6 +69,42 @@ def test_recursive_scan_and_unicode(media_factory, tmp_path):
     assert library.scan(str(root), True)["episodes"][0]["name"] == video.name
     assert library.browse(str(root))["directories"][0]["name"] == "Saison 01"
     assert library.browse(str(root))["parent"] is None
+
+
+def test_mixed_mkv_mp4_browse_scan_and_symlink_filter(media_factory, tmp_path):
+    import shutil
+    root = tmp_path / "mixed"
+    root.mkdir()
+    nested = root / "Season"
+    nested.mkdir()
+    for name in ["Episode.mkv", "Épisode 星 ; '$.MP4"]:
+        source = media_factory(name)
+        shutil.copyfile(source, root / name)
+    shutil.copyfile(root / "Épisode 星 ; '$.MP4", nested / "Episode.mp4")
+    (root / "ignored.avi").write_text("not scanned")
+    (root / "alias.mp4").symlink_to(root / "Episode.mkv")
+    library = MediaLibrary([root])
+    assert {f["name"] for f in library.browse(str(root))["files"]} == {"Episode.mkv", "Épisode 星 ; '$.MP4"}
+    assert len(library.scan(str(root), recursive=False)["episodes"]) == 2
+    recursive = library.scan(str(root))
+    assert len(recursive["episodes"]) == 3 and not recursive["errors"]
+
+
+def test_mp4_extracts_selected_stream_and_external_source(media_factory, tmp_path):
+    from sillage.subtitles import SubtitleDocument
+    video = media_factory("Perfect Run.mp4", multiple=True)
+    library = MediaLibrary([video.parent])
+    before = hashlib.sha256(video.read_bytes()).hexdigest()
+    info = library.inspect(video)
+    assert all(t["supported"] and t["codec"] == "mov_text" and t["format"] == "srt" for t in info["tracks"])
+    source, _ = library.extract(video, info["tracks"][1]["id"], tmp_path)
+    assert "Alternative dialogue." in source.read_text() and "Hello" not in source.read_text()
+    assert [(cue["start"], cue["end"]) for cue in SubtitleDocument.load(source).cues] == [(500, 2000), (2500, 4500)]
+    sidecar = video.with_suffix(".en.srt")
+    sidecar.write_text("1\n00:00:00,500 --> 00:00:02,000\nExternal dialogue.\n\n", encoding="utf-8")
+    source, _ = library.extract(video, "external:" + sidecar.name, tmp_path)
+    assert source.read_bytes() == sidecar.read_bytes()
+    assert hashlib.sha256(video.read_bytes()).hexdigest() == before
 
 
 def test_browse_traversal_and_symlink_escape(video, tmp_path):
@@ -120,8 +160,9 @@ def test_no_shell_interpolation(video, tmp_path):
         assert not kwargs.get("shell", False)
 
 
-def test_invalid_media_reported_without_stderr_leak(tmp_path):
-    (tmp_path / "bad.mkv").write_text("not a video")
+@pytest.mark.parametrize("name", ["bad.mkv", "bad.mp4"])
+def test_invalid_media_reported_without_stderr_leak(tmp_path, name):
+    (tmp_path / name).write_text("not a video")
     result = MediaLibrary([tmp_path]).scan(str(tmp_path))
     assert result["episodes"] == []
     assert len(result["errors"]) == 1
@@ -144,8 +185,9 @@ def test_french_forced_or_signs_only_does_not_hide_full_dialogue(video):
         assert info["status"] == "ready"
 
 
-def test_actual_mkv_without_subtitles(media_factory):
-    video = media_factory(no_subs=True)
+@pytest.mark.parametrize("name", ["Episode.mkv", "Episode.mp4"])
+def test_actual_media_without_subtitles(media_factory, name):
+    video = media_factory(name, no_subs=True)
     result = MediaLibrary([video.parent]).inspect(video)
     assert result["tracks"] == []
     assert result["status"] == "unsupported"

@@ -675,7 +675,7 @@ export function Translations({
       </Modal>
       <Modal open={!!remove} onOpenChange={(open) => { if (!open && !deletion.isPending) setRemove(null); }}
         title="Supprimer de l’historique ?" description={`${remove?.length || 0} entrée${(remove?.length || 0) > 1 ? "s" : ""} sélectionnée${(remove?.length || 0) > 1 ? "s" : ""}`}>
-        <p className="modal-body-copy">Les entrées, leurs checkpoints et fichiers de travail seront supprimés. Les MKV, pistes source et sous-titres déjà exportés restent sur votre disque. Les traitements actifs sont exclus.</p>
+        <p className="modal-body-copy">Les entrées, leurs checkpoints et fichiers de travail seront supprimés. Les MKV et MP4, pistes source et sous-titres déjà exportés restent sur votre disque. Les traitements actifs sont exclus.</p>
         <ul className="history-delete-list">{remove?.slice(0, 5).map((job) => <li key={job.id}>{job.name}<small>{parentFolder(job.path)}</small></li>)}</ul>
         {remove && remove.length > 5 && <p className="modal-body-copy">Et {remove.length - 5} autre{remove.length > 6 ? "s" : ""} entrée{remove.length > 6 ? "s" : ""}. Le nettoyage suit le dossier, la recherche et les filtres affichés, sur toutes les pages (500 entrées maximum à la fois).</p>}
         {deletion.isError && <ErrorNotice error={message(deletion.error)} />}

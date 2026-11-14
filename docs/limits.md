@@ -1,5 +1,11 @@
 # Garanties et limites
 
+## MKV et MP4
+
+Les deux conteneurs sont acceptés dans l’explorateur, le scan récursif, les aperçus et les traitements. Les pistes textuelles MP4 `mov_text` sont extraites en SRT avant traduction ; la sortie est un fichier `.fr.srt` à côté de la vidéo. La vidéo et ses pistes intégrées ne sont jamais modifiées. Les textes et timings sont conservés à la précision milliseconde du SRT ; la conversion ne garantit pas le positionnement ou tous les styles propres au MP4. Les pistes ASS/SSA/SubRip continuent d’être extraites sans conversion.
+
+Les sous-titres incrustés dans l’image et les pistes graphiques nécessitent de l’OCR, absent de Sillage. Sans piste textuelle intégrée, utilisez un fichier externe ASS/SSA/SRT portant le même nom de base que la vidéo. Renommer un MP4 en MKV ne crée pas de piste textuelle.
+
 ## ASS / SSA / SRT
 
 Depuis0.0.13, le champ `Actor` est accepté comme alias de `Name` dans les colonnes `[Events]`, conformément à [libass](https://github.com/libass/libass/blob/master/libass/ass.c). L’en-tête, les noms d’acteurs, les commentaires et les autres métadonnées restent inchangés. L’ordre standard des colonnes reste obligatoire ; les colonnes déplacées, ajoutées ou ambiguës sont refusées. Un traitement bloqué uniquement par cet alias peut être repris après mise à jour, sans supprimer ni réanalyser l’épisode.
@@ -34,7 +40,7 @@ Pause arrête un épisode ou la sélection courante (dossier, recherche, filtres
 
 ## Fichiers et exploitation
 
-La suppression de l’historique est définitive pour les entrées et leurs checkpoints ; elle conserve les MKV, pistes source, profils et sous-titres exportés. Les traitements actifs doivent d’abord être annulés et avoir terminé leurs opérations en cours. Un nettoyage de fichiers temporaires refusé par les permissions est signalé, même si les entrées SQL ont déjà été supprimées. La réanalyse relit la source sans appeler le modèle ni remettre un traitement en file automatiquement ; l’ancien traitement reste disponible. Une nouvelle traduction ne peut pas écraser un export présent.
+La suppression de l’historique est définitive pour les entrées et leurs checkpoints ; elle conserve les MKV et MP4, pistes source, profils et sous-titres exportés. Les traitements actifs doivent d’abord être annulés et avoir terminé leurs opérations en cours. Un nettoyage de fichiers temporaires refusé par les permissions est signalé, même si les entrées SQL ont déjà été supprimées. La réanalyse relit la source sans appeler le modèle ni remettre un traitement en file automatiquement ; l’ancien traitement reste disponible. Une nouvelle traduction ne peut pas écraser un export présent.
 
 Toutes les entrées média passent par les racines canoniques autorisées ; la navigation masque les liens symboliques. Les outils reçoivent des listes d’arguments, jamais une commande shell interpolée. Les sorties utilisent un fichier temporaire et une publication atomique exclusive dans un descripteur de dossier ouvert sans suivi de liens. Un fichier déjà présent n’est jamais remplacé. Une coupure avant publication ne laisse pas de résultat définitif partiel. Une coupure pendant l’écriture peut laisser un temporaire caché ; il n’est pas annoncé comme résultat.
 
@@ -50,4 +56,4 @@ Depuis0.0.10, une réponse qui échoue sur les fragments bascule vers des identi
 
 Les lots réduits peuvent remonter après trois vagues complètes réussies ; un événement difficile ne fixe plus un minimum à tous les épisodes suivants. Seules les répliques à identifiant explicite et individuellement validées sont conservées d’une réponse JSON complète. Une réponse tronquée, un identifiant inconnu ou un contenu hors JSON n’est jamais réparé par déduction. Un modèle qui échoue encore sur une seule réplique peut toujours nécessiter une intervention ; aucune garantie de réussite universelle n’est revendiquée.
 
-Le modèle et les langues restent attachés au traitement via un instantané chiffré, tandis que les limites d’exécution du profil s’appliquent à la prochaine vague. « Adapter les paramètres » permet une reprise en place, individuelle ou groupée, avec conservation des segments validés ou remise à zéro explicite. Conserver des segments après changement de modèle peut mélanger les styles ; un changement de langue connu exige de recommencer. Pour un ancien traitement dont le profil avait déjà changé avant la mise à jour, les paramètres initiaux ne sont pas reconstructibles : vérifiez les langues avant de confirmer la conservation. Ni les MKV ni les exports présents ne sont écrasés.
+Le modèle et les langues restent attachés au traitement via un instantané chiffré, tandis que les limites d’exécution du profil s’appliquent à la prochaine vague. « Adapter les paramètres » permet une reprise en place, individuelle ou groupée, avec conservation des segments validés ou remise à zéro explicite. Conserver des segments après changement de modèle peut mélanger les styles ; un changement de langue connu exige de recommencer. Pour un ancien traitement dont le profil avait déjà changé avant la mise à jour, les paramètres initiaux ne sont pas reconstructibles : vérifiez les langues avant de confirmer la conservation. Ni les vidéos ni les exports présents ne sont écrasés.

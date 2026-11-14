@@ -94,9 +94,12 @@ def environment(video, tmp_path, batch=1):
     return store, worker, request
 
 
-@pytest.mark.parametrize("ass,actor_alias", [(False, False), (True, False), (True, True)])
-async def test_real_pipeline_preserves_mkv_and_timestamps(media_factory, tmp_path, ass, actor_alias):
-    video = media_factory(ass=ass, actor_alias=actor_alias)
+@pytest.mark.parametrize("name,ass,actor_alias", [
+    ("Episode 01.mkv", False, False), ("Episode 01.mkv", True, False),
+    ("Episode 01.mkv", True, True), ("Perfect Run 星.MP4", False, False),
+])
+async def test_real_pipeline_preserves_media_and_timestamps(media_factory, tmp_path, name, ass, actor_alias):
+    video = media_factory(name, ass=ass, actor_alias=actor_alias)
     store, worker, request = environment(video, tmp_path)
     mkv_hash = hashlib.sha256(video.read_bytes()).hexdigest()
     job = (await worker.create(request))[0]

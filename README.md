@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/logo.svg" width="72" height="72" alt="Sillage"></p>
 <h1 align="center">Sillage</h1>
-<p align="center"><strong>A focused, self-hosted subtitle translation studio.</strong><br>Browse a folder, choose your MKV tracks, translate and export safe sidecars.</p>
+<p align="center"><strong>A focused, self-hosted subtitle translation studio.</strong><br>Browse a folder, choose your MKV or MP4 tracks, translate and export safe sidecars.</p>
 <p align="center">
   <a href="https://github.com/lucas-lepajollec/sillage/actions/workflows/ci.yml"><img src="https://github.com/lucas-lepajollec/sillage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/lucas-lepajollec/sillage/pkgs/container/sillage"><img src="https://img.shields.io/badge/container-GHCR-dfb47d" alt="GHCR container"></a>
@@ -9,11 +9,13 @@
 
 ## 1. Overview
 
-Sillage translates text subtitles already present in your MKVs, especially English anime subtitles you want to read in French. It also accepts matching external ASS/SSA/SRT files. The interface is in French, with dark and light themes.
+Sillage translates text subtitles already present in your MKV or MP4 files, especially English anime subtitles you want to read in French. It also accepts matching external ASS/SSA/SRT files. The interface is in French, with dark and light themes.
 
 **Choose a folder → scan → select episodes and tracks → translate → use the sidecars.**
 
-Original MKVs and source subtitles stay intact. Translation preserves source timestamps. Unsupported karaoke, drawings or animations remain untouched and produce explicit review warnings. Sillage stays focused on this workflow; it does not index your entire library at startup or manage your media servers.
+MP4 timed-text tracks are extracted to SRT before translation and exported as `Episode.fr.srt`. Text and cue timings are retained at SRT millisecond precision; MP4-specific positioning and styling are not guaranteed. Burned-in subtitles and bitmap tracks require OCR, which Sillage does not provide. A video without a text track needs matching external ASS/SSA/SRT subtitles.
+
+Original videos and source subtitles stay intact. Translation preserves source timestamps. Unsupported karaoke, drawings or animations remain untouched and produce explicit review warnings. Sillage stays focused on this workflow; it does not index your entire library at startup or manage your media servers.
 
 ## 2. Product preview
 
@@ -24,7 +26,7 @@ The screenshot uses generated test media, not a private library. [Before/after p
 ## 3. Highlights
 
 - Lazy folder navigation, breadcrumbs, recursive scans, filters and explicit per-episode source tracks; apply equivalent tracks to selected episodes, one folder or the whole scan with a checked match list.
-- Embedded and external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
+- Embedded ASS/SSA/SubRip and MP4 timed text (`mov_text`, extracted as SRT); matching external ASS/SSA/SRT; PGS/VobSub detected and clearly excluded from translation.
 - Reasoning disabled when supported; required reasoning stays usable with explicit time/token warnings.
 - Paginated translation history with search/status filters, individual or scoped bulk pause/resume, and readable mobile form fields.
 - Folder-based translation history, free source reanalysis and confirmed cleanup of inactive entries/checkpoints while preserving media and exported subtitles.
@@ -75,7 +77,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.8` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.15` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 
@@ -84,7 +86,7 @@ Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` b
 | Setting or mount | Purpose |
 | --- | --- |
 | `./config:/config` | SQLite jobs, checkpoints, provider settings and separate encryption key. Back up the entire directory together. |
-| `${MEDIA_PATH:-./media}:/media:rw` | Host library. Read access for MKVs/source tracks, write access for translated sidecars. |
+| `${MEDIA_PATH:-./media}:/media:rw` | Host library. Read access for videos/source tracks, write access for translated sidecars. |
 | `PUID` / `PGID` | Worker identity, default `1000:1000`. The root entrypoint initializes config ownership, then drops privileges. Media ownership is never changed. |
 | Port `2511:2511` | Same published and container port. Adapt the host side if it is already used. |
 | `MEDIA_ROOTS` | Advanced backend roots, default `/media`; colon-separated paths inside the container. Mount each directory explicitly. |
@@ -101,15 +103,15 @@ After scanning, use **Piste source** or **Vérifier la piste** for each episode.
 
 Use **Choisir les pistes** to apply equivalent tracks to selected episodes, an exact folder (excluding its subfolders) or all scanned episodes. The review list shows the exact scope, matches and skipped files before applying. Equivalence uses language, normalized title, format, embedded/external kind and forced/SDH indicators, never the stream number. External filenames vary by episode and are not compared. Missing or ambiguous matches keep their current choice. Search and filters do not narrow the explicitly chosen scope. You can return to the automatic choice for the same scope or for one episode. Choices last until a new scan.
 
-New jobs record their source-track metadata and show it in the translation list and preview. Older jobs retain their original track ID; their preview can read its current MKV label, explicitly marked as current metadata rather than a historical snapshot. **Reprendre** uses the original track and checkpoints. To change tracks, create a new translation from the explorer. Applying choices does not modify existing jobs.
+New jobs record their source-track metadata and show it in the translation list and preview. Older jobs retain their original track ID; their preview can read its current video track label, explicitly marked as current metadata rather than a historical snapshot. **Reprendre** uses the original track and checkpoints. To change tracks, create a new translation from the explorer. Applying choices does not modify existing jobs.
 
 ### Browse and manage translation history
 
 **Traductions** opens in **Dossiers** view, grouped by the exact source folder. Cards show the parent/folder name, full path, entry count, active jobs and errors. Open a folder to see its paginated jobs; **Tous les dossiers** returns to the overview. Search and status filters apply before grouping. A **Liste** alternative is remembered locally, and both folders and jobs use the 5/10/25 pagination controls. Queue totals remain global.
 
-**Réanalyser** rereads one job's MKV without a provider call, then prepares that episode in the explorer and opens its source preview. The previous track is selected when still available; otherwise Sillage warns and proposes its usual automatic choice. The old job/checkpoints stay intact. Only pressing **Traduire** queues a new generation. An existing subtitle export is never overwritten; inspect/manage that file separately if replacing a finished result.
+**Réanalyser** rereads one job's video without a provider call, then prepares that episode in the explorer and opens its source preview. The previous track is selected when still available; otherwise Sillage warns and proposes its usual automatic choice. The old job/checkpoints stay intact. Only pressing **Traduire** queues a new generation. An existing subtitle export is never overwritten; inspect/manage that file separately if replacing a finished result.
 
-**Supprimer** removes one inactive history entry, its checkpoints and temporary work files after confirmation. **Nettoyer l’historique** selects inactive entries in the current folder/search/filter across all pages (up to 500 per confirmation). Cancel active jobs first; deletion is refused while a cancellation is still running and is serialized with synchronization decisions. MKVs, source subtitles, provider profiles and exported sidecars remain on disk. If permissions prevent work-file cleanup, the UI reports the leftover files instead of claiming complete cleanup. **Reprendre les erreurs** follows the same folder/search/filter scope across pages.
+**Supprimer** removes one inactive history entry, its checkpoints and temporary work files after confirmation. **Nettoyer l’historique** selects inactive entries in the current folder/search/filter across all pages (up to 500 per confirmation). Cancel active jobs first; deletion is refused while a cancellation is still running and is serialized with synchronization decisions. Videos, source subtitles, provider profiles and exported sidecars remain on disk. If permissions prevent work-file cleanup, the UI reports the leftover files instead of claiming complete cleanup. **Reprendre les erreurs** follows the same folder/search/filter scope across pages.
 
 ## 6. Security, privacy, and limitations
 
@@ -132,7 +134,7 @@ SQLite checkpoints ─ single worker ─ configured cloud/LAN provider
               │
 FFmpeg inspection/extraction ─ guarded subtitle reconstruction
               │
-Validated external sidecar beside the original MKV
+Validated external sidecar beside the original video
 ```
 
 pysubs2 independently validates structure/timings while Sillage patches original text spans. A bounded lexer adapted from Sublarr protects ASS drawing state. ffsubsync's FFT engine and WebRTC VAD supply conservative audio proposals. [Reuse/source audit](docs/research.md) · [Third-party notices](THIRD_PARTY_NOTICES.md).

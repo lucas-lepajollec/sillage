@@ -317,7 +317,7 @@ export default function App() {
         <footer className="workspace-footer">
           <span>
             <ShieldCheck size={12} />
-            Les fichiers MKV restent intacts
+            Les fichiers MKV et MP4 restent intacts
           </span>
           <span>
             Sillage <span className="footer-dot">·</span> Atelier personnel

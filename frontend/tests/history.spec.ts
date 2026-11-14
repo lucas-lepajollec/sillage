@@ -51,7 +51,7 @@ for (const mobile of [false, true]) {
     await page.getByRole("dialog").getByRole("button", { name: "Conserver", exact: true }).click();
     expect(removed).toEqual([]);
     await page.getByRole("button", { name: "Nettoyer l’historique (1)", exact: true }).click();
-    await expect(page.getByRole("dialog")).toContainText("Les MKV, pistes source");
+    await expect(page.getByRole("dialog")).toContainText("Les MKV et MP4, pistes source");
     await page.getByRole("button", { name: "Supprimer définitivement ces entrées", exact: true }).click();
     await expect(page.locator(".job-card")).toHaveCount(1);
     expect(removed).toEqual([["9".repeat(32)]]);

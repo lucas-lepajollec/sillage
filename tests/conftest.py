@@ -25,6 +25,8 @@ def media_factory(tmp_path_factory):
         folder.mkdir()
         srt = folder / "source.en.srt"
         srt.write_text(SRT, encoding="utf-8")
+        alternate = folder / "alternate.en.srt"
+        alternate.write_text(SRT.replace("Hello world!", "Alternative dialogue."), encoding="utf-8")
         ass_file = folder / "source.en.ass"
         ass_file.write_text(ASS.replace("Style, Name, MarginL", "Style, Actor, MarginL") if actor_alias else ASS, encoding="utf-8")
         output = folder / name
@@ -33,13 +35,15 @@ def media_factory(tmp_path_factory):
         if not no_subs:
             args += ["-i", str(ass_file if ass else srt)]
             if multiple:
-                args += ["-i", str(srt)]
+                args += ["-i", str(alternate)]
         args += ["-map", "0:v", "-map", "1:a"]
         if not no_subs:
             args += ["-map", "2:0"]
             if multiple:
                 args += ["-map", "3:0"]
-        args += ["-t", "6", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-c:s", "copy"]
+        mp4 = output.suffix.lower() == ".mp4"
+        args += ["-t", "6", "-c:v", "mpeg4" if mp4 else "ffv1", "-c:a", "aac" if mp4 else "pcm_s16le",
+                 "-c:s", "mov_text" if mp4 else "copy"]
         if not no_subs:
             args += ["-metadata:s:s:0", "language=eng", "-metadata:s:s:0", "title=English full dialogue"]
             if multiple:
@@ -47,6 +51,7 @@ def media_factory(tmp_path_factory):
         args += [str(output)]
         subprocess.run(args, check=True, capture_output=True)
         srt.unlink()
+        alternate.unlink()
         ass_file.unlink()
         return output
     return create

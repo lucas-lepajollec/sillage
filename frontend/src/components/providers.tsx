@@ -327,7 +327,7 @@ export function Providers({
           <div>
             <strong>Vos originaux ont le dernier mot.</strong>
             <p>
-              Export externe à côté des MKV. Timings préservés par défaut. Aucun
+              Export externe à côté des MKV ou MP4. Timings préservés par défaut. Aucun
               fichier existant n’est remplacé automatiquement.
             </p>
           </div>

@@ -24,7 +24,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="sillage-docker-smoke-") as work:
         work = Path(work)
         media = create_library(work / "media")
-        original = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*.mkv")}
+        original = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*") if p.suffix.lower() in {".mkv", ".mp4"}}
         config = work / "config"
         config.mkdir()
         shutil.copyfile(root / "tests" / "docker_provider.py", work / "test-provider.py")
@@ -80,8 +80,9 @@ def main():
                 connection = client.post(f"/api/providers/{provider['id']}/test")
                 assert connection.status_code == 200, connection.text
                 scan = client.post("/api/scan", json={"path": "/media", "recursive": True}).json()
-                assert len(scan["episodes"]) == 3, scan
-                selected = scan["episodes"][:2]
+                assert len(scan["episodes"]) == 4, scan
+                selected = [e for e in scan["episodes"] if not e["has_french"]]
+                assert len(selected) == 3 and any(e["name"].endswith(".MP4") for e in selected)
                 request = {"provider_id": provider["id"], "items": [{"path": e["path"], "track_id": e["tracks"][0]["id"]} for e in selected]}
                 response = client.post("/api/jobs", json=request)
                 response.raise_for_status()
@@ -99,6 +100,10 @@ def main():
                     assert b"Bonjour" in client.get(f"/api/jobs/{job['id']}/download").content
                     preview = client.get(f"/api/jobs/{job['id']}/preview").json()
                     assert preview["cues"][0]["start"] == 500
+                    if job["path"].endswith(".MP4"):
+                        assert job["output"].endswith("Perfect Run 星.fr.srt")
+                        assert job["source_track"]["codec"] == "mov_text"
+                        assert [(cue["start"], cue["end"]) for cue in preview["cues"]] == [(500, 2000), (2500, 4500)]
                 previous = client.get("/api/jobs").json()
                 inspected = client.post(f"/api/jobs/{jobs[0]['id']}/reanalyze", json={})
                 inspected.raise_for_status()
@@ -107,7 +112,7 @@ def main():
                 deletion = client.post("/api/jobs/delete", json={"ids": [jobs[0]["id"]]})
                 deletion.raise_for_status()
                 assert deletion.json() == {"deleted": [jobs[0]["id"]], "warnings": []}
-                assert len(client.get("/api/jobs").json()) == 1
+                assert len(client.get("/api/jobs").json()) == 2
                 docker("exec", name, "python", "-c", "from pathlib import Path; import sys; assert Path(sys.argv[1]).is_file()", jobs[0]["output"])
                 # Pause real HTTP calls, save both in-flight replies, then resume
                 # only the remaining generated cues through the public API.
@@ -208,11 +213,11 @@ def main():
                 assert recovered_job['total'] == 2  # Only normal dialogue is translated.
                 assert any('lettre par lettre' in warning for warning in recovered_job['warnings'])
                 assert hashlib.sha256(sidecar.read_bytes()).hexdigest() == sidecar_hash
-                assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*.mkv")} == original
+                assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*") if p.suffix.lower() in {".mkv", ".mp4"}} == original
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT pipeline, read-only reanalysis, history cleanup preserving exports, cooperative HTTP pause/resume, persistent array failures/partial fragment checkpoints/one-missing-span recovery, preserved frame/glyph effects and late comments, source hashes, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT and MP4 timed-text pipeline, read-only reanalysis, history cleanup preserving exports, cooperative HTTP pause/resume, persistent array failures/partial fragment checkpoints/one-missing-span recovery, preserved frame/glyph effects and late comments, source hashes, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 

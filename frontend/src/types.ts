@@ -3,6 +3,7 @@ export type Track = {
   index: number | null;
   language: string;
   format: string;
+  codec?: string;
   title: string;
   default: boolean;
   forced: boolean;

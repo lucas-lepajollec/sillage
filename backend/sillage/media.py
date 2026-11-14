@@ -1,4 +1,4 @@
-"""Lazy filesystem browsing and read-only media inspection. Never touches the MKV."""
+"""Lazy filesystem browsing and read-only media inspection. Never modifies source media."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
-TEXT_FORMATS = {"ass": "ass", "ssa": "ssa", "subrip": "srt", "srt": "srt"}
+MEDIA_EXTENSIONS = {".mkv", ".mp4"}
+TEXT_FORMATS = {"ass": "ass", "ssa": "ssa", "subrip": "srt", "srt": "srt", "mov_text": "srt"}
 SUB_EXTENSIONS = {".ass", ".ssa", ".srt"}
 FRENCH = {"fr", "fre", "fra", "french", "français"}
 ENGLISH = {"en", "eng", "english"}
@@ -49,7 +50,7 @@ class MediaLibrary:
                 item = {"name": child.name, "path": str(safe)}
                 if child.is_dir():
                     directories.append(item)
-                elif child.suffix.lower() == ".mkv":
+                elif child.suffix.lower() in MEDIA_EXTENSIONS:
                     files.append(item)
             except (OSError, ValueError):
                 continue
@@ -64,7 +65,7 @@ class MediaLibrary:
         for current, dirs, files in os.walk(folder, followlinks=False, onerror=walk_error):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and not Path(current, d).is_symlink())
             for name in sorted(files):
-                if Path(name).suffix.lower() != ".mkv":
+                if Path(name).suffix.lower() not in MEDIA_EXTENSIONS:
                     continue
                 try:
                     path = self.resolve(Path(current, name))
@@ -79,8 +80,8 @@ class MediaLibrary:
 
     def inspect(self, value: str | Path) -> dict:
         path = self.resolve(value)
-        if path.suffix.lower() != ".mkv":
-            raise ValueError("Seuls les fichiers MKV sont acceptés.")
+        if path.suffix.lower() not in MEDIA_EXTENSIONS:
+            raise ValueError("Seuls les fichiers MKV et MP4 sont acceptés.")
         raw = run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)], timeout=90)
         try:
             probe = json.loads(raw)
@@ -96,7 +97,7 @@ class MediaLibrary:
             tags, disposition = stream.get("tags", {}), stream.get("disposition", {})
             codec = stream.get("codec_name", "unknown")
             tracks.append({"id": f"embedded:{stream['index']}", "index": stream["index"],
-                           "language": tags.get("language", "und"), "format": TEXT_FORMATS.get(codec, codec),
+                           "language": tags.get("language", "und"), "format": TEXT_FORMATS.get(codec, codec), "codec": codec,
                            "title": tags.get("title", ""), "default": bool(disposition.get("default")),
                            "forced": bool(disposition.get("forced")), "sdh": bool(disposition.get("hearing_impaired")),
                            "external": False, "supported": codec in TEXT_FORMATS})
@@ -130,8 +131,11 @@ class MediaLibrary:
                 raise ValueError("Fichier de sous-titres trop volumineux (30 Mo maximum).")
             shutil.copyfile(source, output)
         else:
+            # MP4 timed text must be decoded to SRT; stream-copy would produce
+            # an invalid SRT. Existing ASS/SSA/SubRip tracks remain stream-copied.
+            subtitle_codec = "srt" if track.get("codec") == "mov_text" else "copy"
             run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-map", f"0:{track['index']}",
-                 "-c:s", "copy", "-y", str(output)], timeout=180)
+                 "-c:s", subtitle_codec, "-y", str(output)], timeout=180)
         if not output.exists() or output.stat().st_size > 30_000_000:
             raise ValueError("Extraction vide ou trop volumineuse.")
         return output, info
