@@ -80,8 +80,8 @@ def main():
                 connection = client.post(f"/api/providers/{provider['id']}/test")
                 assert connection.status_code == 200, connection.text
                 scan = client.post("/api/scan", json={"path": "/media", "recursive": True}).json()
-                assert len(scan["episodes"]) == 4, scan
-                selected = [e for e in scan["episodes"] if not e["has_french"]]
+                assert len(scan["episodes"]) == 5, scan
+                selected = [e for e in scan["episodes"] if not e["has_french"] and any(t['supported'] for t in e['tracks'])]
                 assert len(selected) == 3 and any(e["name"].endswith(".MP4") for e in selected)
                 request = {"provider_id": provider["id"], "items": [{"path": e["path"], "track_id": e["tracks"][0]["id"]} for e in selected]}
                 response = client.post("/api/jobs", json=request)
@@ -213,11 +213,42 @@ def main():
                 assert recovered_job['total'] == 2  # Only normal dialogue is translated.
                 assert any('lettre par lettre' in warning for warning in recovered_job['warnings'])
                 assert hashlib.sha256(sidecar.read_bytes()).hexdigest() == sidecar_hash
+                # Real burned-in video has no selectable subtitle stream. OCR
+                # prepares a reviewable source without contacting the provider.
+                burned = next(e for e in scan['episodes'] if e['name'] == 'Burned English.mp4')
+                sample = client.post('/api/ocr/snapshot', json={'path': burned['path'], 'at': 1})
+                sample.raise_for_status()
+                assert 'Hello world' in sample.json()['text']
+                response = client.post('/api/ocr/tasks', json={'paths': [burned['path']]})
+                response.raise_for_status()
+                ocr_id = response.json()[0]['id']
+                for _ in range(200):
+                    extraction = client.get(f'/api/ocr/tasks/{ocr_id}').json()
+                    if extraction['status'] in {'review', 'error'}:
+                        break
+                    time.sleep(.2)
+                assert extraction['status'] == 'review' and extraction['cue_count'] == 2, extraction
+                source = media / 'OCR' / 'Burned English.en.ocr.srt'
+                assert not source.exists()
+                response = client.post(f'/api/ocr/tasks/{ocr_id}/publish', json={'content': extraction['srt'], 'reviewed': True})
+                response.raise_for_status()
+                source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+                response = client.post('/api/jobs', json={'provider_id': provider['id'], 'items': [{'path': burned['path'], 'track_id': response.json()['track_id']}]})
+                response.raise_for_status()
+                translated_id = response.json()[0]['id']
+                for _ in range(100):
+                    translated_ocr = next(j for j in client.get('/api/jobs').json() if j['id'] == translated_id)
+                    if translated_ocr['status'] in {'review', 'completed', 'error'}:
+                        break
+                    time.sleep(.2)
+                assert translated_ocr['status'] == 'review' and any('OCR' in w for w in translated_ocr['warnings']), translated_ocr
+                assert b'Bonjour monde!' in client.get(f'/api/jobs/{translated_id}/download').content
+                assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash
                 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in media.rglob("*") if p.suffix.lower() in {".mkv", ".mp4"}} == original
                 # Exercise Docker's declared healthcheck, not only the host HTTP route.
                 assert docker("exec", name, "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:2511/api/health').status == 200") == ""
                 docker("exec", name, "python", "-c", "from sillage.sync import _estimate; import ffsubsync, webrtcvad, numpy")
-                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT and MP4 timed-text pipeline, read-only reanalysis, history cleanup preserving exports, cooperative HTTP pause/resume, persistent array failures/partial fragment checkpoints/one-missing-span recovery, preserved frame/glyph effects and late comments, source hashes, downloads and healthcheck.")
+                print("Docker smoke passed: compiled UI, model discovery, all tools, non-root UID, real MKV ASS/SRT, MP4 timed-text and local burned-in OCR/review/translation pipelines, read-only reanalysis, history cleanup preserving exports, cooperative HTTP pause/resume, persistent array failures/partial fragment checkpoints/one-missing-span recovery, preserved frame/glyph effects and late comments, source hashes, downloads and healthcheck.")
         finally:
             subprocess.run(["docker", *compose_args, "down", "--remove-orphans"], capture_output=True)
 

@@ -14,7 +14,7 @@ COPY backend/ ./backend/
 RUN uv sync --frozen --extra sync --no-dev
 
 FROM python:3.12-slim-bookworm
-ARG VERSION=0.0.15
+ARG VERSION=0.0.16
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="Sillage" \
       org.opencontainers.image.description="A focused, self-hosted subtitle translation studio" \
@@ -23,7 +23,7 @@ LABEL org.opencontainers.image.title="Sillage" \
       org.opencontainers.image.licenses="GPL-3.0-only" \
       org.opencontainers.image.version=$VERSION \
       org.opencontainers.image.revision=$VCS_REF
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg mkvtoolnix tini gosu \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg mkvtoolnix tini gosu tesseract-ocr tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 sillage && useradd -u 1000 -g sillage -m sillage
 WORKDIR /app

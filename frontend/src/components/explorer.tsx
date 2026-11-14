@@ -53,6 +53,7 @@ import { Button } from "./ui/button";
 import { Empty, ErrorNotice, Modal, Spinner, StepHint } from "./shared";
 import { PreviewDrawer } from "./preview";
 import { TrackSelection } from "./track-selection";
+import { OcrDialog, OcrTasks, type OcrTarget } from "./ocr";
 
 export function LibraryTree({
   path,
@@ -243,6 +244,7 @@ export function Explorer({
   ]);
   const [tracks, setTracks] = useState<Record<string, string>>({});
   const [detail, setDetail] = useState<Episode | null>(null);
+  const [ocrTarget, setOcrTarget] = useState<OcrTarget | null>(null);
   const [trackSelection, setTrackSelection] = useState<{ initial?: Episode } | null>(null);
   const [providerId, setProviderId] = useState("");
   const [syncMode, setSyncMode] = useState<SyncMode>("preserve");
@@ -425,7 +427,7 @@ export function Explorer({
       cell: ({ row }) => {
         const e = row.original;
         const selected = tracks[e.path] || preferredTrack(e)?.id || "";
-        return e.tracks.length ? (
+        return <div>{e.tracks.length ? (
           <div className="track-select">
             <select
               aria-label={`Piste source de ${e.name}`}
@@ -453,7 +455,7 @@ export function Explorer({
           </div>
         ) : (
           <span className="muted">Aucun sous-titre</span>
-        );
+        )}<button className="track-preview-link" onClick={() => setOcrTarget({ episode: e })} aria-label={`Extraire le texte incrusté de ${e.name}`}>Extraire par OCR</button></div>;
       },
     },
     {
@@ -651,6 +653,7 @@ export function Explorer({
             ))}
           </div>
         )}
+        <OcrTasks open={setOcrTarget} />
         {scan.isPending && (
           <div className="scan-loading">
             <div className="scan-line-art">
@@ -1148,6 +1151,19 @@ export function Explorer({
           </Button>
         </div>
       </Modal>
+      {ocrTarget && <OcrDialog key={ocrTarget.id || ocrTarget.episode?.path} target={ocrTarget}
+        candidates={episodes.filter(e => !canTranslate(e))} close={() => setOcrTarget(null)} notify={notify}
+        prepared={(episode, track) => {
+          if (!episodes.some(e => e.path === episode.path)) {
+            notify('Source OCR anglaise créée. Scannez le dossier de cet épisode pour la sélectionner.');
+            return;
+          }
+          setInspected({ path: currentPath, data: { episodes: episodes.some(e => e.path === episode.path)
+            ? episodes.map(e => e.path === episode.path ? episode : e) : [...episodes, episode], errors: scanned?.errors || [] } });
+          setTracks(previous => ({ ...previous, [episode.path]: track }));
+          setSelection(previous => ({ ...previous, [episode.path]: true }));
+          notify('Source OCR anglaise créée. Vérifiez le profil puis lancez la traduction.');
+        }} />}
       <Modal
         open={confirmFrench}
         onOpenChange={setConfirmFrench}

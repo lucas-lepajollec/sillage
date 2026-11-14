@@ -18,6 +18,6 @@ Copyright Tomas Karabela. Used as an installed parser/validation dependency. The
 
 Python dependency wheels retain their distribution metadata/license files. These include FastAPI (MIT), Uvicorn (BSD-3-Clause), HTTPX (BSD-3-Clause), cryptography (Apache-2.0 OR BSD-3-Clause), charset-normalizer (MIT), ffsubsync (MIT, Stephen Macke), numpy (BSD-3-Clause), WebRTC VAD bindings and their upstream notices. Frontend packages retain their notices in node_modules; Inter is SIL OFL-1.1, Lucide is ISC, React/TanStack/Radix/Tailwind/CVA/clsx/tailwind-merge are MIT. Exact installed versions are locked in `uv.lock` and `frontend/package-lock.json`.
 
-The runtime image includes Debian FFmpeg/MKVToolNix and supporting packages, with applicable distribution copyright notices under `/usr/share/doc`. Those tools are invoked as separate processes. Redistributors must preserve the applicable source/license obligations for their chosen binary builds; this document does not replace those licenses.
+The runtime image includes Debian FFmpeg/MKVToolNix, Tesseract OCR (Apache-2.0) with the English tessdata language model, and supporting packages, with applicable distribution copyright notices under `/usr/share/doc`. Those tools are invoked as separate processes. Redistributors must preserve the applicable source/license obligations for their chosen binary builds; this document does not replace those licenses.
 
 FileBrowser Quantum (Apache-2.0), Subtitle Translator (MIT) and alass (GPL-3.0) were studied without copying their code. [Research index](docs/research.md).

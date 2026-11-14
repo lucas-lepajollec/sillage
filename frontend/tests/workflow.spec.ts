@@ -239,3 +239,55 @@ test("MP4 timed text → source preview → French SRT download", async ({ page,
   const job = jobs.find((item: { path: string }) => item.path.endsWith("Perfect Run 星.MP4"));
   await request.post("/api/jobs/delete", { data: { ids: [job.id] } });
 });
+
+
+test("burned-in English OCR → review → selectable source → French translation", async ({ page, request }) => {
+  const response = await request.post("/api/providers", { data: {
+    kind: "custom", name: "OCR test HTTP", model: "sillage-test-only",
+    base_url: "http://127.0.0.1:5777/v1", source_language: "en", target_language: "fr",
+  } });
+  const provider = await response.json();
+  await page.goto("/");
+  await page.getByRole("button", { name: "OCR", exact: true }).last().click();
+  await page.getByTestId("scan-button").click();
+  const selection = page.getByRole("checkbox", { name: "Sélectionner Burned English.mp4", exact: true });
+  await expect(selection).toBeDisabled();
+  await page.getByRole("button", { name: "Extraire le texte incrusté de Burned English.mp4", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Image à la seconde", { exact: true }).fill("1");
+  await dialog.getByRole("button", { name: "Tester cette image", exact: true }).click();
+  await expect(dialog.locator("pre")).toContainText("Hello world!");
+  await expect(dialog.getByRole("img")).toBeVisible();
+  await page.screenshot({ path: "test-results/ocr-sample-desktop.png", animations: "disabled" });
+  await dialog.getByRole("button", { name: "Lancer l’OCR sur 1 épisode", exact: true }).click();
+  const editor = dialog.getByLabel("SRT anglais à vérifier", { exact: true });
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await expect(editor).toHaveValue(/Hello world!/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await editor.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const publish = dialog.getByRole("button", { name: "Utiliser ce SRT anglais", exact: true });
+  await expect(publish).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: /J’ai relu le SRT anglais/ }).check();
+  await page.screenshot({ path: "test-results/ocr-review-mobile.png", animations: "disabled" });
+  await publish.click();
+  await expect(selection).toBeEnabled();
+  await expect(selection).toBeChecked();
+  await page.getByLabel("TRADUIRE AVEC", { exact: true }).selectOption(provider.id);
+  await page.getByRole("button", { name: "Traduire", exact: true }).click();
+  await page.getByRole("button", { name: "Liste", exact: true }).click();
+  const card = page.locator(".job-card").filter({ hasText: "Burned English.mp4" });
+  await expect(card).toHaveClass(/job-review/, { timeout: 30_000 });
+  await expect(card.locator(".job-source-track").first()).toContainText("OCR à vérifier");
+  await page.goto("/");
+  await page.locator(".ocr-history-list button").filter({ hasText: "Burned English.mp4" }).click();
+  await page.getByRole("button", { name: "Retirer cette entrée OCR", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("Les vidéos et les SRT déjà publiés restent sur disque");
+  await page.getByRole("button", { name: "Conserver l’extraction", exact: true }).click();
+  await page.getByRole("button", { name: "Retirer cette entrée OCR", exact: true }).click();
+  await page.getByRole("button", { name: "Retirer l’entrée OCR", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const root = (await (await request.get("/api/browse")).json()).path;
+  const scan = await (await request.post("/api/scan", { data: { path: root + "/OCR", recursive: true } })).json();
+  expect(scan.episodes[0].tracks.some((track: { ocr?: boolean }) => track.ocr)).toBeTruthy();
+});

@@ -1,10 +1,10 @@
 # Contributing
 
-Keep changes focused on the folder → scan → select → translate → sidecar workflow. Read [AGENTS.md](AGENTS.md), [architecture](docs/research.md) and [limits](docs/limits.md) first. Media-server integrations, OCR, speech transcription, remuxing and multi-user management are outside the current scope.
+Keep changes focused on the folder → scan → select → translate → sidecar workflow. Read [AGENTS.md](AGENTS.md), [architecture](docs/research.md) and [limits](docs/limits.md) first. Media-server integrations, bitmap-track OCR, speech transcription, remuxing and multi-user management are outside the current scope.
 
 ## Setup
 
-Install Python 3.12+, uv, Node 22+, FFmpeg/ffprobe and Docker. From a fresh clone:
+Install Python 3.12+, uv, Node 22+, FFmpeg/ffprobe, Tesseract with its English language package, DejaVu fonts (test fixtures) and Docker. From a fresh clone:
 
 ```bash
 uv sync --frozen --extra dev --extra sync --python 3.12

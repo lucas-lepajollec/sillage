@@ -17,6 +17,10 @@ FRENCH = {"fr", "fre", "fra", "french", "français"}
 ENGLISH = {"en", "eng", "english"}
 
 
+def source_warnings(track: dict) -> list[str]:
+    return ["Source OCR : relisez le texte et vérifiez les timings estimés dans votre lecteur."] if track.get("ocr") else []
+
+
 class MediaLibrary:
     def __init__(self, roots: list[Path]):
         self.roots = [p.expanduser().resolve() for p in roots]
@@ -111,11 +115,13 @@ class MediaLibrary:
             tracks.append({"id": f"external:{safe.name}", "index": None, "language": lang,
                            "format": sidecar.suffix[1:].lower(), "title": sidecar.name, "default": False,
                            "forced": "forced" in tokens, "sdh": "sdh" in tokens, "external": True,
-                           "path": str(safe), "supported": True})
+                           "path": str(safe), "supported": True, "ocr": "ocr" in tokens})
         french_tracks = [t for t in tracks if t["language"].lower() in FRENCH]
         has_french = any(not t["forced"] and not re.search(r"signs?\s*(?:only|&|/|and)|(?:panneaux|signs)\s*(?:seuls|only)", t["title"], re.I) for t in french_tracks)
         ready = any(t["supported"] and t["language"].lower() in ENGLISH for t in tracks)
+        video = next((s for s in probe.get("streams", []) if s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")), {})
         return {"path": str(path), "name": path.name, "duration": duration, "tracks": tracks,
+                "video_width": video.get("width", 0), "video_height": video.get("height", 0),
                 "has_french": has_french, "has_french_partial": bool(french_tracks) and not has_french, "status": "existing" if has_french else "ready" if ready else "manual" if any(t["supported"] for t in tracks) else "unsupported"}
 
     def extract(self, value: str | Path, track_id: str, work: Path) -> tuple[Path, dict]:
@@ -146,7 +152,7 @@ class MediaLibrary:
         link() refuses an existing destination, including a symlink, without a racy exists()/replace().
         """
         source = self.resolve(video)
-        if not re.fullmatch(r"\.[a-z]{2,3}\.(?:ass|ssa|srt)", suffix):
+        if not re.fullmatch(r"\.[a-z]{2,3}\.(?:ass|ssa|srt)|\.en\.ocr\.srt", suffix):
             raise ValueError("Extension de sortie interdite.")
         parent = self.resolve(source.parent, directory=True)
         # Open each canonical component without following symlinks (concurrent rename defense).
