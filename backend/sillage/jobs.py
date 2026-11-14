@@ -13,7 +13,8 @@ from pathlib import Path
 from subprocess import TimeoutExpired
 
 from . import providers
-from .media import MediaLibrary
+from .media import MediaLibrary, source_warnings
+from .ocr import OcrService
 from .storage import Store, now, provider_fingerprint as fingerprint
 from .subtitles import SubtitleDocument
 from .sync import propose_sync
@@ -41,6 +42,7 @@ def target_code(config: dict) -> str:
 class Worker:
     def __init__(self, store: Store, library: MediaLibrary):
         self.store, self.library = store, library
+        self.ocr = OcrService(store, library)
         self.task: asyncio.Task | None = None
         self.active: str | None = None
         self.stopping = False
@@ -49,6 +51,7 @@ class Worker:
         self.inflight: dict[str, list[asyncio.Task]] = {}
 
     async def start(self):
+        self.ocr.recover()
         for job in self.store.jobs():
             if job["status"] == "pausing" or job.get("pause_requested"):
                 self.store.patch(job["id"], status="paused", pause_requested=False)
@@ -73,7 +76,11 @@ class Worker:
         while not self.stopping:
             pending = [j for j in reversed(self.store.jobs()) if j["status"] == "queued"]
             if not pending:
-                await asyncio.sleep(0.35)
+                ocr = self.ocr.pending()
+                if ocr:
+                    await self.ocr.run(ocr['id'])
+                else:
+                    await asyncio.sleep(0.35)
                 continue
             job = pending[0]
             self.active = job["id"]
@@ -239,6 +246,7 @@ class Worker:
         self.validate_duration(doc, info["duration"])
         warnings = list(dict.fromkeys(doc.warnings + job.get("warnings", [])))
         track = next(t for t in info["tracks"] if t["id"] == job["track_id"])
+        warnings = list(dict.fromkeys(warnings + source_warnings(track)))
         self.store.patch(jid, source_hash=digest, source_file=str(source), total=len(doc.segments), warnings=warnings,
                          source_track={k: v for k, v in track.items() if k != "path"}, source_stats=doc.stats)
         saved = self.store.translations(jid)

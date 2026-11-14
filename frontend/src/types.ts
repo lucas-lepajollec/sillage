@@ -4,6 +4,7 @@ export type Track = {
   language: string;
   format: string;
   codec?: string;
+  ocr?: boolean;
   title: string;
   default: boolean;
   forced: boolean;

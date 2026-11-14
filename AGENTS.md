@@ -1,6 +1,6 @@
 # Sillage maintainer instructions
 
-Sillage is a focused, self-hosted subtitle translation studio: browse mounted media, select MKV/MP4 tracks, translate text, validate and publish external sidecars. French UI; English public documentation.
+Sillage is a focused, self-hosted subtitle translation studio: browse mounted media, select MKV/MP4 tracks or explicitly prepare a reviewed English OCR source, translate text, validate and publish external sidecars. French UI; English public documentation.
 
 ## Preserve media and translation boundaries
 
@@ -12,13 +12,20 @@ Sillage is a focused, self-hosted subtitle translation studio: browse mounted me
 - Export through exclusive atomic publication. Never replace existing output automatically.
 - Keep provider secrets on the backend, encrypted at rest and excluded from logs/API responses.
 
+## Local burned-in OCR
+
+- OCR is explicit and local, English only. Never send images to a provider, infer missing dialogue, modify video or automatically launch translation.
+- Use the existing single worker, bounded frame streams and subprocess output/time limits. Kill/drain decoder and OCR children on cancellation/shutdown.
+- Persist completed observations and the active cue. Require review before exclusive `.en.ocr.srt` publication; original timestamps are unavailable, so retain estimated-timing warnings through translation.
+- Bitmap subtitle rendering, other OCR languages and speech transcription remain outside this slice.
+
 ## Release numbering
 
 Lucas explicitly chose `0.0.X`, increasing only the final number (starting with 0.0.4). Keep historical 0.1/0.2/0.3 tags intact. Explicitly mark the newest release/image as latest; do not infer it from the highest semantic version.
 
 ## Development and verification
 
-Python 3.12+, uv, Node 22+, Docker and FFmpeg/ffprobe:
+Python 3.12+, uv, Node 22+, Docker, FFmpeg/ffprobe, Tesseract English and DejaVu fonts for generated tests:
 
 ```bash
 uv sync --frozen --extra dev --extra sync --python 3.12

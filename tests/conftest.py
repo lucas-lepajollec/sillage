@@ -1,6 +1,20 @@
 import subprocess
 import pytest
 
+
+def create_burned_video(folder, name="Burned English.mp4", *, blank=False):
+    folder.mkdir(parents=True, exist_ok=True)
+    output = folder / name
+    filters = [] if blank else [
+        "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Hello world!':fontcolor=white:fontsize=42:borderw=3:bordercolor=black:x=(w-tw)/2:y=450:enable='between(t,0.5,1.999)'",
+        "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Goodbye world!':fontcolor=white:fontsize=42:borderw=3:bordercolor=black:x=(w-tw)/2:y=450:enable='between(t,2.5,4.499)'",
+    ]
+    args = ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=0x183448:size=960x540:rate=24:duration=6"]
+    if filters:
+        args += ["-vf", ",".join(filters)]
+    subprocess.run(args + ["-c:v", "mpeg4", "-an", str(output)], check=True, capture_output=True)
+    return output
+
 SRT = "1\n00:00:00,500 --> 00:00:02,000\nHello world!\n\n2\n00:00:02,500 --> 00:00:04,500\nGoodbye.\n\n"
 ASS = r"""[Script Info]
 Title: Sillage synthetic end-to-end fixture

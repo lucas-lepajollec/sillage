@@ -41,6 +41,7 @@ class Store:
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, data TEXT NOT NULL, secret TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS ocr_tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS checkpoints (job TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL,
                     PRIMARY KEY(job,id));
                 CREATE TABLE IF NOT EXISTS fragment_checkpoints (job TEXT NOT NULL, id TEXT NOT NULL,
@@ -145,6 +146,43 @@ class Store:
         with self.connect() as db:
             rows = db.execute("SELECT data FROM jobs ORDER BY rowid DESC").fetchall()
         return [json.loads(row[0]) for row in rows]
+
+    def ocr_tasks(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute("SELECT json_remove(data,'$.cues','$.active','$.fingerprint'), json_array_length(data,'$.cues') FROM ocr_tasks ORDER BY rowid DESC").fetchall()
+        return [json.loads(row[0]) | {'cue_count': row[1]} for row in rows]
+
+    def ocr_control(self, tid: str) -> tuple[str, bool]:
+        with self.connect() as db:
+            row = db.execute("SELECT json_extract(data,'$.status'), json_extract(data,'$.pause_requested') FROM ocr_tasks WHERE id=?", (tid,)).fetchone()
+        if not row:
+            raise ValueError("Extraction OCR introuvable.")
+        return row[0], bool(row[1])
+
+    def ocr_task(self, tid: str) -> dict:
+        with self.connect() as db:
+            row = db.execute("SELECT data FROM ocr_tasks WHERE id=?", (tid,)).fetchone()
+        if not row:
+            raise ValueError("Extraction OCR introuvable.")
+        return json.loads(row[0])
+
+    def ocr_put_many(self, tasks: list[dict]):
+        with self.connect() as db:
+            db.executemany("INSERT INTO ocr_tasks VALUES(?,?)", [(task['id'], json.dumps(task)) for task in tasks])
+
+    def ocr_patch(self, tid: str, **changes) -> dict:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM ocr_tasks WHERE id=?", (tid,)).fetchone()
+            if not row:
+                raise ValueError("Extraction OCR introuvable.")
+            task = json.loads(row[0]) | changes
+            db.execute("UPDATE ocr_tasks SET data=? WHERE id=?", (json.dumps(task), tid))
+        return task
+
+    def ocr_delete(self, tid: str):
+        with self.connect() as db:
+            db.execute("DELETE FROM ocr_tasks WHERE id=?", (tid,))
 
     def job(self, jid: str) -> dict:
         with self.connect() as db:

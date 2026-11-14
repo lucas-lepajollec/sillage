@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,7 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__
 from .jobs import Worker
-from .media import MediaLibrary
+from .media import MediaLibrary, source_warnings
+from .ocr import OcrOptions
 from .models import discover_models
 from .providers import ProviderConfig, test_connection
 from .storage import Store
@@ -63,6 +65,25 @@ class ModelListRequest(BaseModel):
     kind: str = Field(max_length=30)
     base_url: str = Field(default="", max_length=2048)
     api_key: str = Field(default="", max_length=8192, repr=False)
+
+
+class OcrCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paths: list[Annotated[str, Field(max_length=4096)]] = Field(min_length=1, max_length=50)
+    options: OcrOptions = Field(default_factory=OcrOptions)
+
+
+class OcrSnapshotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    path: str = Field(max_length=4096)
+    options: OcrOptions = Field(default_factory=OcrOptions)
+    at: float = Field(default=30, ge=0, le=14400)
+
+
+class OcrPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(min_length=1, max_length=2_000_000)
+    reviewed: bool
 
 
 def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, *, run_worker: bool = True) -> FastAPI:
@@ -128,7 +149,33 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": __version__, "tools": {tool: bool(shutil.which(tool)) for tool in ["ffmpeg", "ffprobe", "mkvextract", "ffsubsync"]}}
+        return {"status": "ok", "version": __version__, "tools": {tool: bool(shutil.which(tool)) for tool in ["ffmpeg", "ffprobe", "mkvextract", "ffsubsync", "tesseract"]}}
+
+    @app.get("/api/ocr/tasks")
+    def ocr_tasks():
+        return [worker.ocr.public(t) for t in store.ocr_tasks()]
+
+    @app.post("/api/ocr/snapshot")
+    async def ocr_snapshot(data: OcrSnapshotRequest):
+        return await worker.ocr.snapshot(data.path, data.options, data.at)
+
+    @app.post("/api/ocr/tasks")
+    async def ocr_create(data: OcrCreateRequest):
+        return await worker.ocr.prepare(data.paths, data.options)
+
+    @app.get("/api/ocr/tasks/{tid}")
+    def ocr_result(tid: str):
+        return worker.ocr.public(store.ocr_task(tid), result=True)
+
+    @app.post("/api/ocr/tasks/{tid}/publish")
+    async def ocr_publish(tid: str, data: OcrPublishRequest):
+        if not data.reviewed:
+            raise ValueError("Relisez le SRT anglais avant de confirmer.")
+        return await worker.ocr.publish(tid, data.content)
+
+    @app.post("/api/ocr/tasks/{tid}/{action}")
+    async def ocr_action(tid: str, action: str):
+        return await worker.ocr.action(tid, action)
 
     @app.get("/api/browse")
     async def browse(path: str | None = None):
@@ -149,6 +196,7 @@ def create_app(config_dir: Path | None = None, roots: list[Path] | None = None, 
             except ValueError as exc:
                 warnings.append(str(exc))
             track = next(t for t in info["tracks"] if t["id"] == data.track_id)
+            warnings.extend(source_warnings(track))
             return {"format": doc.format, "cues": doc.cues, "warnings": warnings,
                     "source_track": {k: v for k, v in track.items() if k != "path"}, "source_track_origin": "current",
                     "stats": doc.stats,

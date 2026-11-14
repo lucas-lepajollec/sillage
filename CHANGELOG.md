@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.16 — 2026-11-14
+
+- Add explicit local English OCR for burned-in subtitles: crop/sample preview, contrast settings, single-episode or scoped batch queue, progress and durable pause/resume/cancel. Tesseract English is included in Docker; images remain local and no provider is called during extraction.
+- Review and edit estimated-timing English SRT before exclusive `Episode.en.ocr.srt` publication, then select it for the existing translation workflow. Preserve videos, existing sidecars and translation checkpoints; retain OCR review warnings. Add a separate automatically created SQLite OCR-task table.
+- Bound frames, queue, output sizes and subprocess lifetimes; require stable observations, sanitize OCR text and tool errors, verify source identity on resume/publication, and recover only an exact persisted publication intent. Bitmap-track rendering, other OCR languages and speech transcription remain outside scope.
+
+
 ## 0.0.15 — 2026-11-14
 
 - Accept MKV and MP4 files throughout browsing, recursive scans, source-track previews, translation and external exports, including uppercase extensions and matching ASS/SSA/SRT sidecars.

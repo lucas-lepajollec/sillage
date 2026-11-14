@@ -13,7 +13,7 @@ Sillage translates text subtitles already present in your MKV or MP4 files, espe
 
 **Choose a folder → scan → select episodes and tracks → translate → use the sidecars.**
 
-MP4 timed-text tracks are extracted to SRT before translation and exported as `Episode.fr.srt`. Text and cue timings are retained at SRT millisecond precision; MP4-specific positioning and styling are not guaranteed. Burned-in subtitles and bitmap tracks require OCR, which Sillage does not provide. A video without a text track needs matching external ASS/SSA/SRT subtitles.
+MP4 timed-text tracks are extracted to SRT before translation and exported as `Episode.fr.srt`. Text and cue timings are retained at SRT millisecond precision; MP4-specific positioning and styling are not guaranteed. Burned-in English subtitles can be extracted locally with the explicit OCR workflow below. Separate bitmap subtitle tracks still require an external OCR workflow. A video without a text track needs matching external ASS/SSA/SRT subtitles.
 
 Original videos and source subtitles stay intact. Translation preserves source timestamps. Unsupported karaoke, drawings or animations remain untouched and produce explicit review warnings. Sillage stays focused on this workflow; it does not index your entire library at startup or manage your media servers.
 
@@ -77,7 +77,7 @@ cd sillage
 docker compose up -d
 ```
 
-This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.15` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
+This downloads the published image; it does not build source or require Python/Node on your NAS. For a reproducible release, replace `:latest` with `:0.0.16` or a recorded image digest. [Detailed Docker operations](docs/docker.md).
 
 Updating from 0.2.0 or earlier? Change the Compose port mapping to `2511:2511` before pulling the new image. See [port migration and rollback](docs/docker.md#updating-from-020-or-earlier).
 
@@ -122,6 +122,16 @@ Cloud translation sends subtitle text, context and glossary to your chosen provi
 **Preserved timestamps do not mean verified audio synchronization.** Automatic alignment uses the first audio track, proposes only a bounded global offset and can refuse uncertain material. It requires 2 minutes–4 hours of audio and at least 20 usable cues. It does not fix clock drift or different cuts.
 
 ASS syntax preservation does not prove that longer French signs fit their original position or that your player has the expected fonts. Complex karaoke, drawings, transformations and effects can remain untranslated with warnings. Real-model language quality, actual Jellyfin playback and sync confidence on your collection still require operator acceptance. [Detailed limits](docs/limits.md) · [Security policy](SECURITY.md).
+
+### Extract burned-in English subtitles
+
+If a video shows subtitles but the explorer reports no text source, use **Extraire par OCR** on its row. Choose a second containing dialogue, adjust the percentage crop and test the image. Tesseract English runs locally; no images are sent to a provider and no model download is needed in Docker. The default contrast targets light text with dark outlines; grayscale is available for other styles.
+
+After a readable sample, start one episode or explicitly apply the same settings to up to50 episodes in the current scan (including its subfolders). The existing single worker runs one task at a time; queued translations have priority. OCR can take substantial time on a NAS. Progress and pause/resume/cancel are available in **Extractions OCR**, including after a restart. Cropped images are streamed in memory and discarded; completed OCR cues and progress stay in the private configuration database. At most200 OCR entries are retained; remove old entries in their dialog when needed, without deleting videos or published subtitles.
+
+Review/edit the resulting English SRT and confirm **Utiliser ce SRT anglais**. Sillage exclusively creates `Episode.en.ocr.srt`, then makes it selectable for the usual translation to `Episode.fr.srt`. Existing files are never overwritten. No cloud call starts until you separately launch translation. OCR sources keep a review warning in previews/translated jobs.
+
+OCR timings are estimates from2 or4 samples per second (500/250ms grid), not preserved embedded timestamps or audio verification. Short text, animated subtitles, low contrast, scene text and signs outside the crop may be missed or misread; two consecutive consistent samples are required. Confidence is a heuristic score, not a correctness probability. Original burned-in English remains visible in the video and may overlap French player subtitles; adjust subtitle placement in your player. The first version supports English burned-in text, not rendering separate PGS/VobSub tracks, Japanese OCR or speech transcription. Videos up to4 hours,10,000 cues and a2MB reviewed SRT are supported. [OCR limits and recovery](docs/limits.md#ocr-anglais-incrusté).
 
 ## 7. Architecture
 

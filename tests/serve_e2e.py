@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import uvicorn
 
 sys.path.insert(0, str(Path(__file__).parent))
-from conftest import ASS, SRT  # noqa: E402
+from conftest import ASS, SRT, create_burned_video  # noqa: E402
 from sillage.app import create_app  # noqa: E402
 
 
@@ -83,6 +83,7 @@ def create_library(root: Path):
         "-c:s", "mov_text", "-metadata:s:s:0", "language=eng", str(mp4_folder / "Perfect Run 星.MP4"),
     ], check=True, capture_output=True)
     subtitle.unlink()
+    create_burned_video(root / "OCR")
     return root
 
 
